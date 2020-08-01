@@ -4,14 +4,27 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/pingcap/go-randgen/gendata"
-	"github.com/pingcap/go-randgen/grammar/yacc_parser"
-	"github.com/yuin/gopher-lua"
 	"io"
 	"log"
 	"math/rand"
 	"time"
+
+	"github.com/pingcap/go-randgen/grammar/yacc_parser"
+	lua "github.com/yuin/gopher-lua"
 )
+
+type KeyFuncs map[string]func() (string, error)
+
+func (k KeyFuncs) Gen(key string) (string, bool, error) {
+	if kf, ok := k[key]; ok {
+		if res, err := kf(); err != nil {
+			return res, true, err
+		} else {
+			return res, true, nil
+		}
+	}
+	return "", false, nil
+}
 
 type BranchAnalyze struct {
 	NonTerminal string
@@ -73,13 +86,13 @@ func (p *PathInfo) clear() {
 type SQLRandomlyIterator struct {
 	productionName string
 	productionMap  map[string]*yacc_parser.Production
-	keyFunc        gendata.Keyfun
+	keyFuncs       KeyFuncs
 	luaVM          *lua.LState
 	printBuf       *bytes.Buffer
 	// path info
 	pathInfo     *PathInfo
 	maxRecursive int
-	rander      *rand.Rand
+	rng          *rand.Rand
 	debug        bool
 }
 
@@ -130,10 +143,10 @@ func getLuaPrintFun(buf *bytes.Buffer) func(*lua.LState) int {
 // if debug is true, the iterator will print all paths during generation
 func GenerateSQLRandomly(headCodeBlocks []*yacc_parser.CodeBlock,
 	productionMap map[string]*yacc_parser.Production,
-	keyFunc gendata.Keyfun, productionName string, maxRecursive int,
-	rander *rand.Rand, debug bool) (SQLIterator, error) {
+	keyFuncs KeyFuncs, productionName string, maxRecursive int,
+	rng *rand.Rand, debug bool) (SQLIterator, error) {
 	l := lua.NewState()
-	registerKeyfun(l, keyFunc)
+	registerKeyFuncs(l, keyFuncs)
 	// run head code blocks
 	for _, codeblock := range headCodeBlocks {
 		if err := l.DoString(codeblock.OriginString()[1 : len(codeblock.OriginString())-1]); err != nil {
@@ -144,25 +157,25 @@ func GenerateSQLRandomly(headCodeBlocks []*yacc_parser.CodeBlock,
 	pBuf := &bytes.Buffer{}
 	// cover the origin lua print function
 	l.SetGlobal("print", l.NewFunction(getLuaPrintFun(pBuf)))
-	if rander == nil {
-		rander = rand.New(rand.NewSource(time.Now().UnixNano()))
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
 
 	return &SQLRandomlyIterator{
 		productionName: productionName,
 		productionMap:  productionMap,
-		keyFunc:        keyFunc,
+		keyFuncs:       keyFuncs,
 		luaVM:          l,
 		printBuf:       pBuf,
 		maxRecursive:   maxRecursive,
 		pathInfo:       newPathInfo(),
-		rander:         rander,
+		rng:            rng,
 		debug:          debug,
 	}, nil
 }
 
-func registerKeyfun(luaVM *lua.LState, keyFunc gendata.Keyfun) {
-	for funName, function := range keyFunc {
+func registerKeyFuncs(luaVM *lua.LState, keyFuncs KeyFuncs) {
+	for funName, function := range keyFuncs {
 		fun := function
 		luaVM.SetGlobal(funName, luaVM.NewFunction(func(state *lua.LState) int {
 			s, err := fun()
@@ -231,7 +244,7 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 	}
 
 	// random an alter
-	selectIndex := i.rander.Intn(len(selectableSeqs))
+	selectIndex := i.rng.Intn(len(selectableSeqs))
 	seqs := selectableSeqs[selectIndex]
 	i.pathInfo.SeqSet.add(seqs)
 	firstWrite := true
@@ -273,7 +286,7 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 			}
 
 			// key word parse
-			if res, ok, err := i.keyFunc.Gen(item.OriginString()); err != nil {
+			if res, ok, err := i.keyFuncs.Gen(item.OriginString()); err != nil {
 				return !firstWrite, err
 			} else if ok {
 				i.printDebugInfo(res, recurCounter)
@@ -323,7 +336,9 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 			}
 		}
 	}
-
+	if sqlBuffer.Len() == 0 {
+		fmt.Println(">>>")
+	}
 	return !firstWrite, nil
 }
 

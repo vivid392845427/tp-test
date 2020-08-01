@@ -3,21 +3,19 @@ package grammar
 import (
 	"math/rand"
 
-	"github.com/pingcap/go-randgen/gendata"
 	"github.com/pingcap/go-randgen/grammar/sql_generator"
 	"github.com/pingcap/go-randgen/grammar/yacc_parser"
 )
 
-
 func NewIter(yy string, root string, maxRecursive int,
-	keyFunc gendata.Keyfun, debug bool) (sql_generator.SQLIterator, error) {
-	return NewIterWithRander(yy, root, maxRecursive, keyFunc, nil, debug)
+	keyFuncs sql_generator.KeyFuncs, debug bool) (sql_generator.SQLIterator, error) {
+	return NewIterWithRand(yy, root, maxRecursive, keyFuncs, nil, debug)
 }
 
-// Get Iterator by yy. The same rander could guarantee the same result.
+// Get Iterator by yy. The same rand could guarantee the same result.
 // Note that this iterator is not thread safe
-func NewIterWithRander(yy string, root string, maxRecursive int,
-	keyFunc gendata.Keyfun, rander *rand.Rand, debug bool) (sql_generator.SQLIterator, error) {
+func NewIterWithRand(yy string, root string, maxRecursive int,
+	keyFuncs sql_generator.KeyFuncs, rng *rand.Rand, debug bool) (sql_generator.SQLIterator, error) {
 
 	codeblocks, _, productionMap, err := Parse(yy)
 	if err != nil {
@@ -25,7 +23,7 @@ func NewIterWithRander(yy string, root string, maxRecursive int,
 	}
 
 	sqlIter, err := sql_generator.GenerateSQLRandomly(codeblocks,
-		productionMap, keyFunc, root, maxRecursive, rander, debug)
+		productionMap, keyFuncs, root, maxRecursive, rng, debug)
 	if err != nil {
 		return nil, err
 	}

@@ -2,31 +2,31 @@ package grammar
 
 import (
 	"fmt"
-	"github.com/pingcap/go-randgen/gendata"
-	"github.com/pingcap/go-randgen/grammar/sql_generator"
-	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"testing"
+
+	"github.com/pingcap/go-randgen/grammar/sql_generator"
+	"github.com/stretchr/testify/assert"
 )
 
-type randerCase struct {
-	rander *rand.Rand
+type randCase struct {
+	rng    *rand.Rand
 	expSeq []string
 }
 
 type yyTestCase struct {
-	name       string
-	yy         string
-	num        int
-	keyFun     gendata.Keyfun
-	simpleExp  string
-	expected   func(string) bool
-	expSeq     []string
-	randerCase *randerCase
+	name      string
+	yy        string
+	num       int
+	keyFuncs  sql_generator.KeyFuncs
+	simpleExp string
+	expected  func(string) bool
+	expSeq    []string
+	randCase  *randCase
 }
 
 func TestIter(t *testing.T) {
-	rander := rand.New(rand.NewSource(0))
+	rng := rand.New(rand.NewSource(0))
 	cases := []*yyTestCase{
 		{
 			name: "test embeded lua",
@@ -46,9 +46,9 @@ query:
 				}
 				return false
 			},
-			randerCase: &randerCase{
-				rander:rander,
-				expSeq:[]string{
+			randCase: &randCase{
+				rng: rng,
+				expSeq: []string{
 					"0",
 					"0",
 					"3",
@@ -122,7 +122,7 @@ frame_clause:
 query:
     A _table B _field
 `,
-			keyFun: map[string]func() (string, error){
+			keyFuncs: map[string]func() (string, error){
 				"_table": func() (string, error) {
 					return "aaa_tabl", nil
 				},
@@ -139,7 +139,7 @@ query:
 query:{table = _table()}
     CREATE {print(table)}; UPDATE {print(table)} 
 `,
-			keyFun: map[string]func() (string, error){
+			keyFuncs: map[string]func() (string, error){
 				"_table": func() (string, error) {
 					return "aaa_tabl", nil
 				},
@@ -156,7 +156,7 @@ query:{table = _table()}
 
 		t.Run(c.name, func(t *testing.T) {
 			iterator, err := NewIter(c.yy, "query", 5,
-				c.keyFun, false)
+				c.keyFuncs, false)
 			assert.Equal(t, nil, err)
 
 			iterator.Visit(sql_generator.FixedTimesVisitor(func(i int, sql string) {
@@ -171,10 +171,10 @@ query:{table = _table()}
 				}
 			}, c.num))
 
-			if c.randerCase != nil { //case with rander
-				rCase := c.randerCase
-				randIter, err := NewIterWithRander(c.yy, "query", 5,
-					c.keyFun, rCase.rander,false)
+			if c.randCase != nil { //case with rng
+				rCase := c.randCase
+				randIter, err := NewIterWithRand(c.yy, "query", 5,
+					c.keyFuncs, rCase.rng, false)
 				assert.Equal(t, nil, err)
 
 				randIter.Visit(sql_generator.FixedTimesVisitor(func(i int, sql string) {
