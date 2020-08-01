@@ -16,3 +16,4 @@ coverage.html
 dump/
 out
 gen
+/tp-test/tp-test
