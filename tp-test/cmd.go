@@ -97,7 +97,7 @@ func genTestCmd(g *global) *cobra.Command {
 					for k, txn := range t.Steps {
 						fmt.Printf("-- T%d.%d\n", i, k)
 						for _, stmt := range txn {
-							fmt.Println(stmt.Stmt, "-- query:", naiveQueryDetect(stmt.Stmt))
+							fmt.Println(stmt.Stmt, "; -- query:", naiveQueryDetect(stmt.Stmt))
 						}
 					}
 				} else {
