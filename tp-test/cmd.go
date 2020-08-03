@@ -68,18 +68,18 @@ func clearCmd(g *global) *cobra.Command {
 func genTestCmd(g *global) *cobra.Command {
 	var (
 		opts   genTestOptions
-		input  string
 		tests  int
 		dryrun bool
 	)
 
 	cmd := &cobra.Command{
-		Use:           "gen",
+		Use:           "gen <input file>",
 		Short:         "Generate tests",
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		Args:          cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			yy, err := ioutil.ReadFile(input)
+			yy, err := ioutil.ReadFile(args[0])
 			if err != nil {
 				return err
 			}
@@ -110,7 +110,6 @@ func genTestCmd(g *global) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&input, "input", "a.yy", "input grammar file")
 	cmd.Flags().IntVar(&tests, "test", 1, "number of test to generate")
 	cmd.Flags().BoolVar(&dryrun, "dry-run", false, "dry run")
 	cmd.Flags().StringVar(&opts.Root, "root", "query", "entry rule")
@@ -170,16 +169,14 @@ func runTestCmd(g *global) *cobra.Command {
 }
 
 func whyTestCmd(g *global) *cobra.Command {
-	var (
-		id string
-	)
-
 	cmd := &cobra.Command{
-		Use:           "why",
+		Use:           "why <test id>",
 		Short:         "Explain a test",
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		Args:          cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
 			db, err := sql.Open("mysql", g.storeDSN)
 			if err != nil {
 				return err
@@ -290,6 +287,5 @@ func whyTestCmd(g *global) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&id, "id", "", "test id")
 	return cmd
 }
