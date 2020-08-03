@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/go-randgen/grammar/sql_generator"
+
 	. "github.com/zyguan/xs"
 )
 
@@ -54,7 +56,7 @@ func schemaRule() Rule {
 	)
 }
 
-func randInt() int { return rand.Intn(20) }
+func randInt() int { return rand.Intn(20) + 1 }
 
 func randDouble() float64 { return rand.Float64() }
 
@@ -169,4 +171,38 @@ func randSet() string {
 func randJson() string {
 	return fmt.Sprintf(`{"int":%d,"str":"%s","datetime":"%s","enum":"%s","set":"%s"}`,
 		randInt(), randString(), randDatetime(), randEnum(), randSet())
+}
+
+func registerSchemaFuncs(fs sql_generator.KeyFuncs) sql_generator.KeyFuncs {
+	if fs == nil {
+		fs = make(sql_generator.KeyFuncs)
+	}
+	fs["__c_int__"] = func() (s string, err error) {
+		return strconv.Itoa(randInt()), nil
+	}
+	fs["__c_double__"] = func() (s string, err error) {
+		return fmt.Sprintf("%.6f", randDouble()), nil
+	}
+	fs["__c_decimal__"] = func() (s string, err error) {
+		return fmt.Sprintf("%.2f", randDecimal()), nil
+	}
+	fs["__c_string__"] = func() (s string, err error) {
+		return "'" + randString() + "'", nil
+	}
+	fs["__c_datetime__"] = func() (s string, err error) {
+		return "'" + randDatetime() + "'", nil
+	}
+	fs["__c_timestamp__"] = func() (s string, err error) {
+		return "'" + randTimestamp() + "'", nil
+	}
+	fs["__c_enum__"] = func() (s string, err error) {
+		return "'" + randEnum() + "'", nil
+	}
+	fs["__c_set__"] = func() (s string, err error) {
+		return "'" + randSet() + "'", nil
+	}
+	fs["__c_json__"] = func() (s string, err error) {
+		return "'" + randJson() + "'", nil
+	}
+	return fs
 }

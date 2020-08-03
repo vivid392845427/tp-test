@@ -157,6 +157,17 @@ func GenerateSQLRandomly(headCodeBlocks []*yacc_parser.CodeBlock,
 	pBuf := &bytes.Buffer{}
 	// cover the origin lua print function
 	l.SetGlobal("print", l.NewFunction(getLuaPrintFun(pBuf)))
+	for k := range keyFuncs {
+		name := k
+		l.SetGlobal(name, l.NewClosure(func(L *lua.LState) int {
+			s, err := keyFuncs[name]()
+			if err != nil {
+				L.RaiseError(err.Error())
+			}
+			L.Push(lua.LString(s))
+			return 1
+		}))
+	}
 	if rng == nil {
 		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}

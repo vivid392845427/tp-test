@@ -24,7 +24,7 @@ func genTest(opts genTestOptions) (test Test, err error) {
 	}
 	test.Init = &opts.Inits[rand.Intn(len(opts.Inits))]
 
-	it, err := grammar.NewIter(opts.Grammar, opts.Root, opts.MaxRecursion, nil, opts.Debug)
+	it, err := grammar.NewIter(opts.Grammar, opts.Root, opts.MaxRecursion, registerSchemaFuncs(nil), opts.Debug)
 	if err != nil {
 		return Test{}, err
 	}
