@@ -347,9 +347,6 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 			}
 		}
 	}
-	if sqlBuffer.Len() == 0 {
-		fmt.Println(">>>")
-	}
 	return !firstWrite, nil
 }
 
