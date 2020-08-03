@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/zyguan/sqlz/resultset"
 
 	. "github.com/zyguan/just"
@@ -103,6 +104,18 @@ func runABTest(ctx context.Context, opts runABTestOptions) error {
 			if !validateErrs(err1, err2) {
 				return fail(fmt.Errorf("commit txn #%d: %v <> %v", i, err1, err2))
 			}
+
+			h1, err1 := checkTable(ctx, db1, dbName1+".t")
+			if err1 != nil {
+				return fail(fmt.Errorf("check table of %s after txn #%d: %v", opts.Tag1, i, err1))
+			}
+			h2, err2 := checkTable(ctx, db2, dbName2+".t")
+			if err2 != nil {
+				return fail(fmt.Errorf("check table of %s after txn #%d: %v", opts.Tag2, i, err2))
+			}
+			if h1 != h2 {
+				return fail(fmt.Errorf("data mismatch after txn #%d: %s != %s", i, h1, h2))
+			}
 		}
 
 		store.SetTest(t.ID, TestPassed, "")
@@ -124,6 +137,27 @@ func initTest(ctx context.Context, db *sql.DB, name string, t *Test) (err error)
 		conn.ExecContext(ctx, stmt)
 	}
 	return
+}
+
+func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
+	_, err := db.ExecContext(ctx, "admin check table "+name)
+	if err != nil {
+		if e, ok := err.(*mysql.MySQLError); !ok || e.Number != 1064 {
+			return "", err
+		}
+	}
+	rows, err := db.QueryContext(ctx, "select * from "+name)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	rs, err := resultset.ReadFromRows(rows)
+	if err != nil {
+		return "", err
+	}
+	return unorderedDigest(rs, func(col resultset.ColumnDef) bool {
+		return col.Type != "JSON"
+	}), nil
 }
 
 func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.Tx, tx2 *sql.Tx) error {
@@ -155,7 +189,7 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.
 		h1, h2 := "", ""
 		if stmt.IsQuery && rs1.NRows() == rs2.NRows() && rs1.NRows() > 1 &&
 			!strings.Contains(strings.ToLower(stmt.Stmt), "order by") {
-			h1, h2 = unorderedDigest(rs1), unorderedDigest(rs2)
+			h1, h2 = unorderedDigest(rs1, nil), unorderedDigest(rs2, nil)
 		} else {
 			h1, h2 = rs1.DataDigest(), rs2.DataDigest()
 		}
@@ -174,11 +208,20 @@ func (r rows) Less(i, j int) bool { return bytes.Compare(r[i], r[j]) < 0 }
 
 func (r rows) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
 
-func unorderedDigest(rs *resultset.ResultSet) string {
+func unorderedDigest(rs *resultset.ResultSet, colFilter func(resultset.ColumnDef) bool) string {
+	if colFilter == nil {
+		colFilter = func(_ resultset.ColumnDef) bool { return true }
+	}
+	cols := make([]int, 0, rs.NCols())
+	for i := 0; i < rs.NCols(); i++ {
+		if colFilter(rs.ColumnDef(i)) {
+			cols = append(cols, i)
+		}
+	}
 	digests := make(rows, rs.NRows())
 	for i := 0; i < rs.NRows(); i++ {
 		h := sha1.New()
-		for j := 0; j < rs.NCols(); j++ {
+		for _, j := range cols {
 			raw, _ := rs.RawValue(i, j)
 			h.Write(raw)
 		}

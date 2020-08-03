@@ -1,6 +1,6 @@
 {
 function selected_cols()
-    print("c_int, c_double, c_decimal, c_string, c_datetime, c_enum, c_set")
+    print("c_int, c_double, c_decimal, c_string, c_datetime, c_timestamp, c_enum, c_set")
 end
 }
 

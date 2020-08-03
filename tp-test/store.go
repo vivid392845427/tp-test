@@ -15,8 +15,6 @@ import (
 	"github.com/zyguan/xs"
 
 	. "github.com/zyguan/just"
-
-	_ "github.com/go-sql-driver/mysql"
 )
 
 const (
