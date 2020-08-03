@@ -165,10 +165,15 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.
 
 	record := func(seq int, tag string, rs *resultset.ResultSet, err error) {
 		if rs != nil {
-			raw, err := rs.Encode()
-			opts.Store.PutStmtResult(t.ID, seq, tag, raw, err)
+			raw, _ := rs.Encode()
+			opts.Store.PutStmtResult(t.ID, seq, tag, Result{
+				Raw:          raw,
+				Err:          err,
+				RowsAffected: rs.ExecResult().RowsAffected,
+				LastInsertId: rs.ExecResult().LastInsertId,
+			})
 		} else {
-			opts.Store.PutStmtResult(t.ID, seq, tag, nil, err)
+			opts.Store.PutStmtResult(t.ID, seq, tag, Result{Err: err})
 		}
 	}
 
@@ -195,6 +200,10 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.
 		}
 		if h1 != h2 {
 			return fmt.Errorf("result disgests mismatch: %s != %s @(%s,%d) %q", h1, h2, t.ID, stmt.Seq, stmt.Stmt)
+		}
+		if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
+			return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
+				rs1.ExecResult().RowsAffected, rs2.ExecResult().RowsAffected, t.ID, stmt.Seq, stmt.Stmt)
 		}
 	}
 	return nil

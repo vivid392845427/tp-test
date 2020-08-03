@@ -25,6 +25,13 @@ const (
 	TestUnknown = "Unknown"
 )
 
+type Result struct {
+	Raw          []byte
+	Err          error
+	RowsAffected int64
+	LastInsertId int64
+}
+
 type Store interface {
 	Init() error
 	Clear() error
@@ -32,7 +39,7 @@ type Store interface {
 	AddTest(test Test) error
 	NextPendingTest() (*Test, error)
 	SetTest(id string, status string, message string) error
-	PutStmtResult(id string, seq int, tag string, result []byte, err error) error
+	PutStmtResult(id string, seq int, tag string, result Result) error
 }
 
 type Init struct {
@@ -166,13 +173,13 @@ func (s *store) SetTest(id string, status string, message string) error {
 	return err
 }
 
-func (s *store) PutStmtResult(id string, seq int, tag string, result []byte, error error) error {
+func (s *store) PutStmtResult(id string, seq int, tag string, result Result) error {
 	errmsg := ""
-	if error != nil {
-		errmsg = error.Error()
+	if result.Err != nil {
+		errmsg = result.Err.Error()
 	}
-	_, err := s.db.Exec("insert into stmt_result (test_id, seq, tag, error, result, created_at) values (?, ?, ?, ?, ?, ?)",
-		id, seq, tag, errmsg, result, time.Now().Unix())
+	_, err := s.db.Exec("insert into stmt_result (test_id, seq, tag, error, result, rows_affected, last_insert_id, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)",
+		id, seq, tag, errmsg, result.Raw, result.RowsAffected, result.LastInsertId, time.Now().Unix())
 	return err
 }
 
@@ -204,6 +211,8 @@ func initDB(db *sqlz.DB) (err error) {
     tag varchar(40) not null,
     error text,
     result longblob,
+    rows_affected int,
+    last_insert_id int,
     created_at int not null,
     primary key (id),
     key (test_id, seq)
