@@ -13,11 +13,11 @@ random_op: common_read | common_write
 random_ops: random_op | random_op; random_ops
 
 common_read:
-    select { selected_cols() } from t where c_int = __c_int__ order by c_int, c_string
-|   select { selected_cols() } from t where c_int in (__c_int__, __c_int__, __c_int__) order by c_int, c_string
-|   select { selected_cols() } from t where c_int between { print(math.random(5)); } and { print(5+math.random(5)); } order by c_int, c_string
-|   select { selected_cols() } from t where c_string = __c_int__ order by c_int, c_string
-|   select { selected_cols() } from t where c_decimal < 20 order by c_int, c_string
+    select { selected_cols() } from t where c_int = __c_int__
+|   select { selected_cols() } from t where c_int in (__c_int__, __c_int__, __c_int__)
+|   select { selected_cols() } from t where c_int between { print(math.random(5)); } and { print(5+math.random(5)); }
+|   select { selected_cols() } from t where c_string = __c_int__
+|   select { selected_cols() } from t where c_decimal < 20
 |   select sum(c_int) from t where c_datetime < __c_datetime__
 
 common_write:

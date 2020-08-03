@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"math/rand"
+	"sort"
 	"strings"
 	"time"
 
@@ -148,11 +152,44 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.
 			log.Printf("skip query error: [%v] [%v] @(%s,%d)", err1, err2, t.ID, stmt.Seq)
 			continue
 		}
-		if h1, h2 := rs1.DataDigest(), rs2.DataDigest(); h1 != h2 {
+		h1, h2 := "", ""
+		if stmt.IsQuery && rs1.NRows() == rs2.NRows() && rs1.NRows() > 1 &&
+			!strings.Contains(strings.ToLower(stmt.Stmt), "order by") {
+			h1, h2 = unorderedDigest(rs1), unorderedDigest(rs2)
+		} else {
+			h1, h2 = rs1.DataDigest(), rs2.DataDigest()
+		}
+		if h1 != h2 {
 			return fmt.Errorf("result disgests mismatch: %s != %s @(%s,%d) %q", h1, h2, t.ID, stmt.Seq, stmt.Stmt)
 		}
 	}
 	return nil
+}
+
+type rows [][]byte
+
+func (r rows) Len() int { return len(r) }
+
+func (r rows) Less(i, j int) bool { return bytes.Compare(r[i], r[j]) < 0 }
+
+func (r rows) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
+
+func unorderedDigest(rs *resultset.ResultSet) string {
+	digests := make(rows, rs.NRows())
+	for i := 0; i < rs.NRows(); i++ {
+		h := sha1.New()
+		for j := 0; j < rs.NCols(); j++ {
+			raw, _ := rs.RawValue(i, j)
+			h.Write(raw)
+		}
+		digests[i] = h.Sum(nil)
+	}
+	sort.Sort(digests)
+	h := sha1.New()
+	for _, digest := range digests {
+		h.Write(digest)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func doStmt(ctx context.Context, tx *sql.Tx, stmt Stmt) (*resultset.ResultSet, error) {
