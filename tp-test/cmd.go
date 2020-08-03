@@ -201,12 +201,6 @@ func whyTestCmd(g *global) *cobra.Command {
 			if t.Status != TestFailed {
 				return nil
 			}
-			row = db.QueryRow("select r1.seq, r1.tag, r1.result, r1.error, r2.tag, r2.result, r2.error from stmt_result r1 join stmt_result r2 "+
-				"where r1.test_id = ? and r1.test_id = r2.test_id and r1.seq = r2.seq and r1.tag < r2.tag and r1.result != r2.result "+
-				"order by r1.seq desc, r1.tag asc", id)
-			if err != nil {
-				return err
-			}
 
 			dumpRes := func(tag string, raw []byte, err string) {
 				fmt.Println("\n**" + tag + "**")
@@ -233,7 +227,7 @@ func whyTestCmd(g *global) *cobra.Command {
 					fmt.Println("oops: " + err.Error())
 					return
 				}
-				fmt.Println("\n---")
+				fmt.Println("-- init")
 				fmt.Println(initSQL)
 
 				rows, err := db.Query("select stmt, txn from stmt where test_id = ? and seq <= ? order by seq", id, seq)
@@ -251,6 +245,7 @@ func whyTestCmd(g *global) *cobra.Command {
 						if lastTxn != -1 {
 							fmt.Println("commit;")
 						}
+						fmt.Printf("-- txn:%d\n", stmt.Txn)
 						fmt.Println("begin;")
 					}
 					fmt.Println(stmt.Stmt + ";")
@@ -264,25 +259,40 @@ func whyTestCmd(g *global) *cobra.Command {
 			var (
 				seq  int
 				stmt string
-				tag1 string
-				tag2 string
-				raw1 []byte
-				raw2 []byte
-				err1 string
-				err2 string
 			)
-			if err := row.Scan(&seq, &tag1, &raw1, &err1, &tag2, &raw2, &err2); err != nil {
+			if err := db.QueryRow("select seq from stmt_result where test_id = ? order by seq desc", id).Scan(&seq); err != nil {
 				return err
 			}
 			if err := db.QueryRow("select stmt from stmt where test_id = ? and seq = ?", id, seq).Scan(&stmt); err != nil {
 				return err
 			}
-			fmt.Printf("\n## %d: %s\n", seq, stmt)
+			fmt.Println("\n## last query")
+			fmt.Printf("\n%d: %s\n", seq, stmt)
+
 			fmt.Println("\n```")
-			dumpRes(tag1, raw1, err1)
-			dumpRes(tag2, raw2, err2)
+			rows, err := db.Query("select tag, result, error from stmt_result where test_id = ? and seq = ? order by tag", id, seq)
+			if err != nil {
+				fmt.Println("oops: " + err.Error())
+			} else {
+				defer rows.Close()
+				for rows.Next() {
+					var (
+						tag string
+						err string
+						raw []byte
+					)
+					if rows.Scan(&tag, &raw, &err) == nil {
+						dumpRes(tag, raw, err)
+					}
+				}
+			}
+			fmt.Println("\n```")
+
+			fmt.Println("\n## history")
+
+			fmt.Println("\n```")
 			dumpStmts(seq)
-			fmt.Println("\n```")
+			fmt.Println("```")
 
 			return nil
 		},
