@@ -199,7 +199,7 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.
 			h1, h2 = rs1.DataDigest(), rs2.DataDigest()
 		}
 		if h1 != h2 {
-			return fmt.Errorf("result disgests mismatch: %s != %s @(%s,%d) %q", h1, h2, t.ID, stmt.Seq, stmt.Stmt)
+			return fmt.Errorf("result digests mismatch: %s != %s @(%s,%d) %q", h1, h2, t.ID, stmt.Seq, stmt.Stmt)
 		}
 		if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
 			return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",

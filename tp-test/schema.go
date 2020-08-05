@@ -13,47 +13,45 @@ import (
 )
 
 func schemaRule() Rule {
+	var rules []interface{}
 
 	collate := Seq("collate", OneOf("utf8_general_ci", "utf8mb4_bin"))
 
-	pk := OneOf(
-		", primary key (c_int), key (c_string)",
-		", primary key (c_int), unique key (c_string)",
-		", primary key (c_int), unique key (c_int, c_string)",
+	prefix := Seq(
+		"create table t (",
+		"c_int int,",
+		"c_double double,",
+		"c_decimal decimal(12,6),",
+		"c_string varchar(40)", OneOf(Empty(), collate), ",",
+		"c_datetime datetime,",
+		"c_timestamp timestamp,",
+		"c_enum enum('a', 'b', 'c', 'd', 'e'),",
+		"c_set set('1', '2', '3', '4', '5'),",
+		"c_json json",
 	)
 
-	keys := Seq(
-		OneOf(pk, ", primary key (c_int, c_string), unique key (c_string)"),
+	rules = append(rules, Seq(prefix, OneOf(Empty(), Seq(
+		OneOf(
+			", primary key (c_int), key (c_string)",
+			", primary key (c_int), unique key (c_string)",
+			", primary key (c_int), unique key (c_int, c_string)",
+			", primary key (c_int, c_string), unique key (c_string)",
+			", primary key (c_string), key (c_int)",
+			", primary key (c_string), unique key (c_int)",
+			", primary key (c_string), unique key (c_int, c_string)",
+		),
 		", key (c_enum), key (c_set), key (c_timestamp), key (c_datetime), key (c_decimal)",
-	)
+	)), ")"))
 
-	return OneOf(
-		Seq("create table t (",
-			"c_int int,",
-			"c_double double,",
-			"c_decimal decimal(12,6),",
-			"c_string varchar(40)", OneOf(Empty(), collate), ",",
-			"c_datetime datetime,",
-			"c_timestamp timestamp,",
-			"c_enum enum('a', 'b', 'c', 'd', 'e'),",
-			"c_set set('1', '2', '3', '4', '5'),",
-			"c_json json",
-			OneOf(Empty(), keys),
-			")"),
-		Seq("create table t (",
-			"c_int int auto_increment,",
-			"c_double double,",
-			"c_decimal decimal(12,6),",
-			"c_string varchar(40)", OneOf(Empty(), collate), ",",
-			"c_datetime datetime,",
-			"c_timestamp timestamp,",
-			"c_enum enum('a', 'b', 'c', 'd', 'e'),",
-			"c_set set('1', '2', '3', '4', '5'),",
-			"c_json json",
-			keys,
-			")"),
-		// TODO: add auto_random schemas for tidb-only test
-	)
+	rules = append(rules, Seq(prefix, OneOf(
+		", primary key (c_int), key (c_string)",
+		", primary key (c_int), unique key (c_int, c_string)",
+	), ", key (c_enum), key (c_set), key (c_timestamp), key (c_datetime), key (c_decimal)", OneOf(
+		") partition by hash(c_int) partitions 4",
+		") partition by range(c_int) (partition p1 values less than (5), partition p2 values less than (10), partition p3 values less than (15), partition p4 values less than maxvalue)",
+	)))
+
+	return OneOf(rules...)
 }
 
 func randInt() int { return rand.Intn(20) + 1 }
