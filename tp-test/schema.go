@@ -51,6 +51,42 @@ func schemaRule() Rule {
 		") partition by range(c_int) (partition p1 values less than (5), partition p2 values less than (10), partition p3 values less than (15), partition p4 values less than maxvalue)",
 	)))
 
+	rules = append(rules, Seq(
+		"create table t (",
+		"c_int bigint primary key /*T![auto_rand] auto_random(", OneOf("3", "5"), ") */,",
+		"c_double double,",
+		"c_decimal decimal(12,6),",
+		"c_string varchar(40),",
+		"c_datetime datetime,",
+		"c_timestamp timestamp,",
+		"c_enum enum('a', 'b', 'c', 'd', 'e'),",
+		"c_set set('1', '2', '3', '4', '5'),",
+		"c_json json",
+		OneOf(
+			Empty(),
+			", key (c_string), key (c_enum), key (c_set), key (c_timestamp), key (c_datetime), key (c_decimal)",
+			", unique key (c_string), key (c_enum), key (c_set), key (c_timestamp), key (c_datetime), key (c_decimal)",
+		), ")",
+	))
+
+	rules = append(rules, Seq(
+		"create table t (",
+		"c_int int,",
+		"c_double double,",
+		"c_decimal decimal(12,6),",
+		"c_string varchar(40),",
+		"c_datetime datetime,",
+		"c_timestamp timestamp,",
+		"c_enum enum('a', 'b', 'c', 'd', 'e'),",
+		"c_set set('1', '2', '3', '4', '5'),",
+		"c_json json",
+		OneOf(
+			Empty(),
+			", key (c_int), key (c_string), key (c_enum), key (c_set), key (c_timestamp), key (c_datetime), key (c_decimal)",
+			", unique key (c_int), key (c_string), key (c_enum), key (c_set), key (c_timestamp), key (c_datetime), key (c_decimal)",
+		), ") /*!90000 shard_row_id_bits =", OneOf("4", "6"), " */",
+	))
+
 	return OneOf(rules...)
 }
 
