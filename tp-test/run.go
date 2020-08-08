@@ -33,13 +33,16 @@ type runABTestOptions struct {
 	Store Store
 }
 
-func runABTest(ctx context.Context, opts runABTestOptions) error {
+func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions) error {
+
 	store, db1, db2 := opts.Store, opts.DB1, opts.DB2
 	if opts.Continue == nil {
 		opts.Continue = func() bool { return true }
 	}
 	for opts.Continue() {
 		select {
+		case <-failed:
+			return nil
 		case <-ctx.Done():
 			return nil
 		default:
@@ -50,6 +53,8 @@ func runABTest(ctx context.Context, opts runABTestOptions) error {
 			if errors.Is(err, sql.ErrNoRows) {
 				log.Printf("no more test")
 				select {
+				case <-failed:
+					return nil
 				case <-ctx.Done():
 					return nil
 				case <-time.After(time.Duration(rand.Intn(10*opts.Threads)) * time.Second):
@@ -89,10 +94,12 @@ func runABTest(ctx context.Context, opts runABTestOptions) error {
 			tx2.Exec("use " + dbName2)
 
 			fail := func(err error) error {
+				defer func() { recover() }()
 				tx1.Rollback()
 				tx2.Rollback()
 				store.SetTest(t.ID, TestFailed, err.Error())
 				log.Printf("test(%s) failed at txn #%d: %v", t.ID, i, err)
+				close(failed)
 				return err
 			}
 
@@ -105,16 +112,18 @@ func runABTest(ctx context.Context, opts runABTestOptions) error {
 				return fail(fmt.Errorf("commit txn #%d: %v <> %v", i, err1, err2))
 			}
 
-			h1, err1 := checkTable(ctx, db1, dbName1+".t")
+			hs1, err1 := checkTables(ctx, db1, dbName1)
 			if err1 != nil {
 				return fail(fmt.Errorf("check table of %s after txn #%d: %v", opts.Tag1, i, err1))
 			}
-			h2, err2 := checkTable(ctx, db2, dbName2+".t")
+			hs2, err2 := checkTables(ctx, db2, dbName2)
 			if err2 != nil {
 				return fail(fmt.Errorf("check table of %s after txn #%d: %v", opts.Tag2, i, err2))
 			}
-			if h1 != h2 {
-				return fail(fmt.Errorf("data mismatch after txn #%d: %s != %s", i, h1, h2))
+			for t := range hs2 {
+				if hs1[t] != hs2[t] {
+					return fail(fmt.Errorf("data mismatch after txn #%d: %s != %s @%s", i, hs1[t], hs2[t], t))
+				}
 			}
 		}
 
@@ -132,13 +141,38 @@ func initTest(ctx context.Context, db *sql.DB, name string, t *Test) (err error)
 	conn := Try(db.Conn(ctx)).(*sql.Conn)
 	defer conn.Close()
 	Try(conn.ExecContext(ctx, "use "+name))
-	for _, stmt := range strings.Split(t.Init.InitSQL, ";") {
+	for _, stmt := range t.InitSQL {
 		// it's ok for some of stmts in init_sql failed
-		conn.ExecContext(ctx, stmt)
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			log.Printf("init stmt failed: %v @ %s", err, stmt)
+		}
 	}
 	return
 }
 
+func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, "select table_name from information_schema.tables where table_schema = ?", name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	hs := make(map[string]string)
+	for rows.Next() {
+		var t string
+		if err = rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		if hs[t], err = checkTable(ctx, db, fmt.Sprintf("`%s`.`%s`", name, t)); err != nil {
+			return nil, err
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return hs, nil
+}
+
+// FIXME show tables and check all
 func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
 	_, err := db.ExecContext(ctx, "admin check table "+name)
 	if err != nil {

@@ -65,14 +65,15 @@ type SQLIterator interface {
 }
 
 type PathInfo struct {
+	Depth         int
 	ProductionSet *ProductionSet
 	SeqSet        *SeqSet
 }
 
 func newPathInfo() *PathInfo {
 	return &PathInfo{
-		newProductionSet(),
-		newSeqSet(),
+		ProductionSet: newProductionSet(),
+		SeqSet:        newSeqSet(),
 	}
 }
 
@@ -94,6 +95,60 @@ type SQLRandomlyIterator struct {
 	maxRecursive int
 	rng          *rand.Rand
 	debug        bool
+}
+
+func NewSQLGen(yy string, fs KeyFuncs, setup func(*lua.LState, io.Writer) error) (*SQLRandomlyIterator, error) {
+	cs, ps, err := yacc_parser.Parse(yacc_parser.Tokenize(&yacc_parser.RuneSeq{Runes: []rune(yy), Pos: 0}))
+	if err != nil {
+		return nil, err
+	}
+	pm := make(map[string]*yacc_parser.Production, len(ps))
+	for _, p := range ps {
+		if pp, ok := pm[p.Head.OriginString()]; ok {
+			pp.Alter = append(pp.Alter, p.Alter...)
+			pm[p.Head.OriginString()] = pp
+			continue
+		}
+		pm[p.Head.OriginString()] = p
+	}
+	it := &SQLRandomlyIterator{
+		productionMap: pm,
+		keyFuncs:      fs,
+		luaVM:         lua.NewState(),
+		printBuf:      new(bytes.Buffer),
+		pathInfo:      newPathInfo(),
+		rng:           rand.New(rand.NewSource(time.Now().UnixNano())),
+		maxRecursive:  15,
+	}
+	if err = setup(it.luaVM, it.printBuf); err != nil {
+		return nil, err
+	}
+	for _, c := range cs {
+		if err := it.luaVM.DoString(c.OriginString()[1 : len(c.OriginString())-1]); err != nil {
+			return nil, err
+		}
+	}
+	return it, nil
+}
+
+func (i *SQLRandomlyIterator) SetRoot(root string) *SQLRandomlyIterator {
+	i.productionName = root
+	return i
+}
+
+func (i *SQLRandomlyIterator) SetRand(rand *rand.Rand) *SQLRandomlyIterator {
+	i.rng = rand
+	return i
+}
+
+func (i *SQLRandomlyIterator) SetDebug(enabled bool) *SQLRandomlyIterator {
+	i.debug = enabled
+	return i
+}
+
+func (i *SQLRandomlyIterator) SetRecurLimit(limit int) *SQLRandomlyIterator {
+	i.maxRecursive = limit
+	return i
 }
 
 func (i *SQLRandomlyIterator) PathInfo() *PathInfo {
@@ -221,6 +276,8 @@ func willRecursive(seq *yacc_parser.Seq, set map[string]bool) bool {
 func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 	recurCounter *linkedMap, sqlBuffer *bytes.Buffer,
 	parentPreSpace bool, visitor SqlVisitor) (hasWrite bool, err error) {
+	i.pathInfo.Depth += 1
+	defer func() { i.pathInfo.Depth -= 1 }()
 	// get root production
 	production, exist := i.productionMap[productionName]
 	if !exist {
@@ -243,10 +300,11 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 			nearMaxRecur[name] = true
 		}
 	}
-	selectableSeqs := make([]*yacc_parser.Seq, 0)
+	selectableSeqs, totalWeight := make([]*yacc_parser.Seq, 0), .0
 	for _, seq := range production.Alter {
-		if !willRecursive(seq, nearMaxRecur) {
+		if seq.Weight > 0 && !willRecursive(seq, nearMaxRecur) {
 			selectableSeqs = append(selectableSeqs, seq)
+			totalWeight += seq.Weight
 		}
 	}
 	if len(selectableSeqs) == 0 {
@@ -255,7 +313,13 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 	}
 
 	// random an alter
-	selectIndex := i.rng.Intn(len(selectableSeqs))
+	selectIndex, thisWeight, targetWeight := 0, .0, i.rng.Float64()*totalWeight
+	for ; selectIndex < len(selectableSeqs); selectIndex++ {
+		thisWeight += selectableSeqs[selectIndex].Weight
+		if thisWeight >= targetWeight {
+			break
+		}
+	}
 	seqs := selectableSeqs[selectIndex]
 	i.pathInfo.SeqSet.add(seqs)
 	firstWrite := true

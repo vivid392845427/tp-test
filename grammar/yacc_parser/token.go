@@ -91,6 +91,19 @@ func (c *comment) OriginString() string {
 	return c.val
 }
 
+type attribute struct {
+	commonAttr
+	val string
+}
+
+func (c *attribute) HasPreSpace() bool {
+	return c.commonAttr.hasPreSpace
+}
+
+func (c *attribute) OriginString() string {
+	return c.val
+}
+
 type CodeBlock struct {
 	commonAttr
 	val string
@@ -119,6 +132,7 @@ const (
 	inKeyWord
 	inNonTerminal
 	inTerminal
+	inAttrBlock
 )
 
 type RuneSeq struct {
@@ -178,6 +192,7 @@ var stateMap = map[rune]int{
 	'#':  inOneLineComment,
 	'{':  inCodeBlock,
 	'_':  inKeyWord,
+	'[':  inAttrBlock,
 }
 
 func runeInitState(r rune) int {
@@ -252,6 +267,8 @@ func Tokenize(reader *RuneSeq) func() (Token, error) {
 					state = inOneLineComment
 				case '_':
 					state = inKeyWord
+				case '[':
+					state = inAttrBlock
 				case '{':
 					state = inCodeBlock
 					stack.Push('{')
@@ -332,6 +349,16 @@ func Tokenize(reader *RuneSeq) func() (Token, error) {
 				}
 				if r == '"' {
 					return &terminal{common, reader.Slice(lookBackPos)}, nil
+				}
+
+			case inAttrBlock:
+				if err == io.EOF || r == '\n' {
+					state = inTerminal
+					reader.SetPos(lookBackPos + 1)
+					continue
+				}
+				if r == ']' {
+					return &attribute{common, reader.Slice(lookBackPos)}, nil
 				}
 
 			//code block related states

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -84,20 +85,20 @@ func genTestCmd(g *global) *cobra.Command {
 				return err
 			}
 			opts.Grammar = string(yy)
-			opts.Inits, err = g.store.LoadInits()
-			if err != nil {
-				return err
-			}
 			for i := 0; i < tests; i++ {
 				t, err := genTest(opts)
 				if err != nil {
 					return err
 				}
 				if dryrun {
+					fmt.Printf("-- T%d.0\n", i)
+					for _, stmt := range t.InitSQL {
+						fmt.Println(stmt + ";")
+					}
 					for k, txn := range t.Steps {
-						fmt.Printf("-- T%d.%d\n", i, k)
+						fmt.Printf("-- T%d.%d\n", i, k+1)
 						for _, stmt := range txn {
-							fmt.Println(stmt.Stmt, "; -- query:", naiveQueryDetect(stmt.Stmt))
+							fmt.Println(stmt.Stmt+"; -- query:", naiveQueryDetect(stmt.Stmt))
 						}
 					}
 				} else {
@@ -112,11 +113,10 @@ func genTestCmd(g *global) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&tests, "test", 1, "number of test to generate")
 	cmd.Flags().BoolVar(&dryrun, "dry-run", false, "dry run")
-	cmd.Flags().StringVar(&opts.Root, "root", "query", "entry rule")
-	cmd.Flags().IntVar(&opts.MaxRecursion, "max-recursion", 5, "max recursion level for sql generation")
+	cmd.Flags().StringVar(&opts.InitRoot, "init-root", "init", "entry rule of initialization sql")
+	cmd.Flags().StringVar(&opts.TxnRoot, "txn-root", "txn", "entry rule of transaction")
+	cmd.Flags().IntVar(&opts.RecurLimit, "recur-limit", 15, "max recursion level for sql generation")
 	cmd.Flags().IntVar(&opts.NumTxn, "txn", 5, "number of transactions per test")
-	cmd.Flags().IntVar(&opts.MinStmt, "min-stmt", 5, "minimum number of statements per transaction")
-	cmd.Flags().IntVar(&opts.MaxStmt, "max-stmt", 10, "maximum number of statements per transaction")
 	cmd.Flags().BoolVar(&opts.Debug, "debug", false, "enable debug option of generator")
 	return cmd
 }
@@ -151,9 +151,10 @@ func runTestCmd(g *global) *cobra.Command {
 					return atomic.AddUint32(&cnt, 1) <= test
 				}
 			}
-			g, ctx := errgroup.WithContext(context.Background())
+			var g errgroup.Group
+			failed := make(chan struct{})
 			for i := 0; i < opts.Threads; i++ {
-				g.Go(func() error { return runABTest(ctx, opts) })
+				g.Go(func() error { return runABTest(context.Background(), failed, opts) })
 			}
 			return g.Wait()
 		},
@@ -182,11 +183,14 @@ func whyTestCmd(g *global) *cobra.Command {
 				return err
 			}
 			var (
-				t      Test
-				initID int
+				t       Test
+				initRaw []byte
 			)
-			row := db.QueryRow("select status, started_at, finished_at, message, init_id from test where id = ?", id)
-			if err := row.Scan(&t.Status, &t.StartedAt, &t.FinishedAt, &t.Message, &initID); err != nil {
+			row := db.QueryRow("select status, started_at, finished_at, message, init_sql from test where id = ?", id)
+			if err := row.Scan(&t.Status, &t.StartedAt, &t.FinishedAt, &t.Message, &initRaw); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(initRaw, &t.InitSQL); err != nil {
 				return err
 			}
 			t1 := time.Unix(t.StartedAt, 0)
@@ -218,17 +222,13 @@ func whyTestCmd(g *global) *cobra.Command {
 
 			dumpStmts := func(seq int) {
 				var (
-					initSQL string
 					stmt    Stmt
 					lastTxn = -1
 				)
-				err := db.QueryRow("select init_sql from init where id = ?", initID).Scan(&initSQL)
-				if err != nil {
-					fmt.Println("oops: " + err.Error())
-					return
-				}
 				fmt.Println("-- init")
-				fmt.Println(initSQL)
+				for _, stmt := range t.InitSQL {
+					fmt.Println(stmt + ";")
+				}
 
 				rows, err := db.Query("select stmt, txn from stmt where test_id = ? and seq <= ? order by seq", id, seq)
 				if err != nil {

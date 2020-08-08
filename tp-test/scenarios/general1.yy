@@ -1,116 +1,142 @@
 {
-function selected_cols()
-    print("c_int, c_double, c_decimal, c_string, c_datetime, c_timestamp, c_enum, c_set")
-end
+
+    local util = require("util")
+
+    T = {
+        c_int = { seq = util.seq() },
+        c_str = {},
+        c_datetime = { range = util.range(1577836800, 1593561599) },
+        c_timestamp = { range = util.range(1577836800, 1593561599) },
+        c_double = { range = util.range(100) },
+        c_decimal = { range = util.range(10) },
+    }
+
+    T.c_int.rand = function() return T.c_int.seq:rand() end
+    T.c_str.rand = function() return random_name() end
+    T.c_datetime.rand = function() return T.c_datetime.range:randt() end
+    T.c_timestamp.rand = function() return T.c_timestamp.range:randt() end
+    T.c_double.rand = function() return T.c_double.range:randf() end
+    T.c_decimal.rand = function() return T.c_decimal.range:randf() end
+
 }
 
-query:
-    random_ops
+init: create_table; insert_data
 
-random_ops: random_op | random_op; random_ops
+txn: rand_querys
 
-random_op:
-    all_read
-|   common_write
-|   update_select
-|   insert_delete
+create_table:
+    create table t (
+        c_int int,
+        c_str varchar(40),
+        c_datetime datetime,
+        c_timestamp timestamp,
+        c_double double,
+        c_decimal decimal(12, 6)
+        key_primary
+        key_c_int
+        key_c_str
+        key_c_decimal
+        key_c_datetime
+        key_c_timestamp
+    )
+
+key_primary:
+ |  , primary key(c_int)
+ |  , primary key(c_str)
+ |  , primary key(c_int, c_str)
+
+key_c_int:
+ |  , key(c_int)
+ |  , unique key(c_int)
+
+key_c_str:
+ |  , key(c_str)
+ |  , unique key(c_str)
+
+key_c_decimal:
+ |  , key(c_decimal)
+ |  , unique key(c_decimal)
+
+key_c_datetime:
+ |  , key(c_datetime)
+ |  , unique key(c_datetime)
+
+key_c_timestamp:
+ |  , key(c_timestamp)
+
+
+insert_data:
+    insert into t values next_row, next_row, next_row, next_row, next_row;
+    insert into t values next_row, next_row, next_row, next_row, next_row;
+    insert into t values next_row, next_row, next_row, next_row, next_row;
+
+next_row: (next_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
+rand_row: (rand_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
+
+next_c_int: { print(T.c_int.seq:next()) }
+rand_c_int: { print(T.c_int.rand()) }
+rand_c_str: { printf("'%s'", T.c_str.rand()) }
+rand_c_str_or_null: rand_c_str | [weight=0.2] null
+rand_c_datetime: { printf("'%s'", T.c_datetime.rand()) }
+rand_c_timestamp: { printf("'%s'", T.c_timestamp.rand()) }
+rand_c_double: { printf("%.6f", T.c_double.rand()) }
+rand_c_decimal: { printf("%.3f", T.c_decimal.rand()) }
+
+union_or_union_all: union | union all
+insert_or_replace: insert | replace
+
+rand_querys:
+    rand_query; rand_query; rand_query; rand_query
+ |  [weight=9] rand_query; rand_querys
+
+rand_query:
+    [weight=0.3] common_select maybe_for_update
+ |  [weight=0.2] (common_select maybe_for_update) union_or_union_all (common_select maybe_for_update)
+ |  [weight=0.3] agg_select maybe_for_update
+ |  [weight=0.2] (agg_select maybe_for_update) union_or_union_all (agg_select maybe_for_update)
+ |  [weight=0.5] common_insert
+ |  common_update
+ |  common_delete
+ |  common_update; common_delete; common_select
+ |  common_insert; common_delete; common_select
+ |  common_delete; common_insert; common_update
 
 maybe_for_update: | for update
-maybe_order_by_limit: | order by c_int, c_string, c_timestamp asc_or_desc | order by c_int, c_string, c_timestamp asc_or_desc limit { print(1+math.random(3)) }
+maybe_write_limit: | [weight=2] order by c_int, c_str, c_double, c_decimal limit { print(math.random(3)) }
 
-asc_or_desc: asc | desc
-union_or_union_all: union | union all
+col_list: c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp
 
-null_or_rand_int: null | __c_int__ | __c_int__ | __c_int__
-null_or_rand_str: null | __c_string__ | __c_string__ | __c_string__
+common_select:
+    select col_list from t where c_int = rand_c_int
+ |  select col_list from t where c_int in (rand_c_int, rand_c_int, rand_c_int)
+ |  select col_list from t where c_int between { k = T.c_int.rand(); print(k) } and { print(k+3) }
+ |  select col_list from t where c_str = rand_c_str
+ |  select col_list from t where c_decimal < { local r = T.c_decimal.range; print((r.max-r.min)/2+r.min) }
+ |  select col_list from t where c_datetime > rand_c_datetime
 
-rand_row:
-    (__c_int__, __c_double__, __c_decimal__, __c_string__, __c_datetime__, __c_timestamp__, __c_enum__, __c_set__, __c_json__)
-|   (__c_int__, __c_double__, __c_decimal__, null_or_rand_str, __c_datetime__, __c_timestamp__, __c_enum__, __c_set__, __c_json__)
-
-rand_row_x:
-    ({ print(20+math.random(5)) }, __c_double__, __c_decimal__, __c_string__, __c_datetime__, __c_timestamp__, __c_enum__, __c_set__, __c_json__)
-|   ({ print(20+math.random(5)) }, __c_double__, __c_decimal__, null_or_rand_str, __c_datetime__, __c_timestamp__, __c_enum__, __c_set__, __c_json__)
-
-
-rand_rows:
-    rand_row, rand_row_x
-|   rand_row, rand_row, rand_row
-|   rand_row_x, rand_row_x, rand_row_x
-
-
-all_read:
-    common_read maybe_order_by_limit maybe_for_update
-|   union_common_read maybe_order_by_limit
-|   agg_read
-|   union_agg_read
-
-common_read:
-    select { selected_cols() } from t where c_int = __c_int__
-|   select { selected_cols() } from t where c_int is null
-|   select { selected_cols() } from t where c_int in (__c_int__, __c_int__, __c_int__)
-|   select { selected_cols() } from t where c_int in { k = __c_int__() } ({ print(k) }, __c_int__, { print(k) })
-|   select { selected_cols() } from t where c_string = __c_string__
-|   select { selected_cols() } from t where c_string is null
-|   select { selected_cols() } from t where c_string in (__c_string__, __c_string__, __c_string__)
-|   select { selected_cols() } from t where c_int between { print(math.random(5)) } and { print(5+math.random(5)) }
-|   select { selected_cols() } from t where c_decimal < { print(math.random(32)) }
-|   select { selected_cols() } from t where c_datetime > __c_datetime__
-
-union_common_read: (common_read maybe_for_update) union_or_union_all (common_read maybe_for_update)
-
-agg_read:
-    { t = __c_timestamp__() } select count(*) from t where c_timestamp between { print(t) } and date_add({ print(t) }, interval 7 day)
-|   { t = __c_datetime__() } select sum(c_int) from t where c_datetime between { print(t) } and date_add({ print(t) }, interval 3 day)
-
-union_agg_read: (agg_read maybe_for_update) union_or_union_all (agg_read maybe_for_update)
-
-common_write:
-    common_update
-|   common_update
-|   common_insert
-|   common_delete
-|   common_insert; common_update; common_delete
+agg_select:
+    select count(*) from t where c_timestamp between { t = T.c_timestamp.rand(); printf("'%s'", t) } and date_add({ printf("'%s'", t) }, interval 15 day)
+ |  select sum(c_int) from t where c_datetime between { t = T.c_datetime.rand(); printf("'%s'", t) } and date_add({ printf("'%s'", t) }, interval 15 day)
 
 common_update:
-    update t set c_int = null_or_rand_int where c_int = __c_int__
-|   update t set c_string = null_or_rand_str where c_int = __c_int__
-|   update t set c_int = null_or_rand_int, c_string = null_or_rand_str where c_int = __c_int__ and c_string > __c_string__
-|   update t set c_decimal = c_decimal - 5 where c_int in (__c_int__, __c_int__, null_or_rand_int)
-|   update t set c_decimal = c_decimal - 5 where c_string in (__c_string__, null_or_rand_str, null_or_rand_str)
-|   update t set c_decimal = c_decimal + 5 where c_decimal <= 20
+    update t set c_str = rand_c_str where c_int = rand_c_int
+ |  update t set c_double = c_decimal, c_decimal = rand_c_decimal where c_int in (rand_c_int, rand_c_int, rand_c_int)
+ |  update t set c_datetime = c_timestamp, c_timestamp = rand_c_timestamp where c_str in (rand_c_str_or_null, rand_c_str_or_null, rand_c_str_or_null)
+ |  update t set c_int = c_int + 10, c_str = rand_c_str where c_int in (rand_c_int, { local k = T.c_int.seq:head(); print(k-2) })
+ |  update t set c_int = c_int + 5, c_str = rand_c_str_or_null where (c_int, c_str) in ((rand_c_int, rand_c_str), (rand_c_int, rand_c_str), (rand_c_int, rand_c_str))
+ |  [weight=0.4] update t set c_datetime = rand_c_datetime, c_timestamp = rand_c_timestamp, c_double = rand_c_double, c_decimal = rand_c_decimal where c_datetime is null maybe_write_limit
+ |  [weight=0.4] update t set c_datetime = rand_c_datetime, c_timestamp = rand_c_timestamp, c_double = rand_c_double, c_decimal = rand_c_decimal where c_decimal is null maybe_write_limit
 
 common_insert:
-    insert ignore into t values rand_row
-|   insert into t values rand_row
-|   insert into t values rand_row on duplicate key update c_int = __c_int__, c_string = __c_string__
-|   insert into t values rand_rows on duplicate key update c_int = c_int + 1, c_string = concat(c_int, ':', c_string)
-|   insert into t set c_int = __c_int__, c_double = __c_double__, c_decimal = __c_decimal__, c_string = __c_string__, c_datetime = __c_datetime__, c_timestamp = __c_timestamp__, c_enum = __c_enum__, c_set = __c_set__, c_json = __c_json__
-|   replace into t values rand_row
-|   replace into t values rand_rows
+    insert into t values next_row
+ |  [weight=0.5] insert_or_replace into t values next_row, next_row, ({ print(T.c_int.seq:head()-1) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
+ |  insert_or_replace into t (c_int, c_str, c_datetime, c_double) values (rand_c_int, rand_c_str, rand_c_datetime, rand_c_double)
+ |  insert_or_replace into t (c_int, c_str, c_timestamp, c_decimal) values (next_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal), (rand_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal)
+ |  insert into t values rand_row, rand_row, next_row on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp)
 
 common_delete:
-    delete from t where c_int = __c_int__
-|   delete from t where c_int is null
-|   delete from t where c_int in (__c_int__, __c_int__, null_or_rand_int)
-|   delete from t where c_string is null
-|   delete from t where c_string in (__c_string__, null_or_rand_str, null_or_rand_str)
-|   delete from t where c_decimal < { print(math.random(20)) }
-
-update_select:
-    { key = __c_int__(); }
-    update t set c_double = __c_double__ where c_int = { print(key); };
-    select { selected_cols() } from t where c_int = { print(key); }
-|   { key = __c_int__(); }
-    update t set c_double = __c_double__ where c_int = { print(key); };
-    random_ops;
-    select { selected_cols() } from t where c_int = { print(key); }
-
-insert_delete:
-    { key = __c_int__(); }
-    insert into t values ({ print(key); }, __c_double__, __c_decimal__, __c_string__, __c_datetime__, __c_timestamp__, __c_enum__, __c_set__, __c_json__);
-    delete from t where c_int = { print(key); }
-|   { key = __c_int__(); }
-    insert into t values ({ print(key); }, __c_double__, __c_decimal__, __c_string__, __c_datetime__, __c_timestamp__, __c_enum__, __c_set__, __c_json__);
-    random_ops;
-    delete from t where c_int = { print(key); }
+    delete from t where c_int = rand_c_int
+ |  delete from t where c_int in ({ local k = T.c_int.seq:head(); print(k-2) }, rand_c_int) or c_str in (rand_c_str, rand_c_str, rand_c_str, rand_c_str) maybe_write_limit
+ |  delete from t where c_str is null
+ |  delete from t where c_decimal > c_double/2 maybe_write_limit
+ |  [weight=0.8] delete from t where c_timestamp is null or c_double is null maybe_write_limit

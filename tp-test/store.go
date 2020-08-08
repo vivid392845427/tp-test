@@ -1,18 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/zyguan/sqlz"
-	"github.com/zyguan/xs"
 
 	. "github.com/zyguan/just"
 )
@@ -35,16 +32,10 @@ type Result struct {
 type Store interface {
 	Init() error
 	Clear() error
-	LoadInits() ([]Init, error)
 	AddTest(test Test) error
 	NextPendingTest() (*Test, error)
 	SetTest(id string, status string, message string) error
 	PutStmtResult(id string, seq int, tag string, result Result) error
-}
-
-type Init struct {
-	ID      int
-	InitSQL string
 }
 
 type Test struct {
@@ -53,7 +44,7 @@ type Test struct {
 	Message    string
 	StartedAt  int64
 	FinishedAt int64
-	Init       *Init
+	InitSQL    []string
 	Steps      []Txn
 }
 
@@ -83,22 +74,9 @@ func (s *store) Init() error { return initDB(s.db) }
 
 func (s *store) Clear() error { return clearDB(s.db) }
 
-func (s *store) LoadInits() (inits []Init, err error) {
-	defer Return(&err)
-	rows := s.db.MustQuery("select id, init_sql from init where enabled = true")
-	defer rows.Close()
-	for rows.Next() {
-		var init Init
-		Try(rows.Scan(&init.ID, &init.InitSQL))
-		inits = append(inits, init)
-	}
-	Try(rows.Err())
-	return inits, nil
-}
-
 func (s *store) AddTest(test Test) (err error) {
 	defer Return(&err)
-	if test.Init == nil {
+	if len(test.InitSQL) == 0 {
 		return errors.New("init is missing")
 	}
 	if len(test.ID) == 0 {
@@ -116,7 +94,8 @@ func (s *store) AddTest(test Test) (err error) {
 			seq += 1
 		}
 	}
-	Try(tx.Exec("insert into test (id, init_id, status) values (?, ?, ?)", test.ID, test.Init.ID, TestPending))
+	init := Try(json.Marshal(test.InitSQL)).([]byte)
+	Try(tx.Exec("insert into test (id, init_sql, status) values (?, ?, ?)", test.ID, string(init), TestPending))
 
 	return tx.Commit()
 }
@@ -124,11 +103,11 @@ func (s *store) AddTest(test Test) (err error) {
 func (s *store) NextPendingTest() (test *Test, err error) {
 	defer Return(&err)
 	var (
-		x Init
 		t = Test{
 			Status:    TestPending,
 			StartedAt: time.Now().Unix(),
 		}
+		buf   []byte
 		stmts []Stmt
 	)
 
@@ -137,9 +116,9 @@ func (s *store) NextPendingTest() (test *Test, err error) {
 	tx := Try(s.db.Begin()).(*sql.Tx)
 	defer tx.Rollback()
 
-	Try(tx.QueryRow("select id, init_id from test where status = ? limit 1 for update", t.Status).Scan(&t.ID, &x.ID))
-	Try(tx.QueryRow("select init_sql from init where id = ?", x.ID).Scan(&x.InitSQL))
+	Try(tx.QueryRow("select id, init_sql from test where status = ? limit 1 for update", t.Status).Scan(&t.ID, &buf))
 	Try(tx.Exec("update test set status = ?, started_at = ? where id = ?", TestRunning, t.StartedAt, t.ID))
+	Try(json.Unmarshal(buf, &t.InitSQL))
 
 	rows := Try(tx.Query("select txn, seq, stmt, is_query from stmt where test_id = ? order by txn, seq", t.ID)).(*sql.Rows)
 	defer rows.Close()
@@ -152,7 +131,6 @@ func (s *store) NextPendingTest() (test *Test, err error) {
 	Try(rows.Err())
 	Try(tx.Commit())
 
-	t.Init = &x
 	for i := 0; i < len(stmts); {
 		j := i + 1
 		for ; j < len(stmts); j++ {
@@ -188,7 +166,7 @@ func initDB(db *sqlz.DB) (err error) {
 
 	db.MustExec(`create table test (
     id char(36) not null,
-    init_id int not null,
+    init_sql longtext not null,
     status varchar(20),
     started_at bigint,
     finished_at bigint,
@@ -217,41 +195,13 @@ func initDB(db *sqlz.DB) (err error) {
     primary key (id),
     key (test_id, seq)
 )`)
-	db.MustExec(`create table init (
-    id int not null auto_increment,
-    init_sql longtext not null,
-    enabled bool default true,
-    primary key (id)
-)`)
-
-	buf := new(bytes.Buffer)
-	rand.Seed(0)
-	xs.Walk(schemaRule(), func(ss []string) {
-		buf.Reset()
-		buf.WriteString(strings.Join(ss, " "))
-		buf.WriteByte(';')
-		insertData(buf)
-		db.MustExec("insert into init (init_sql) values (?)", buf.String())
-	})
 
 	return nil
 }
 
 func clearDB(db *sqlz.DB) error {
-	_, err := db.Exec("drop table if exists test, init, stmt, stmt_result")
+	_, err := db.Exec("drop table if exists test, stmt, stmt_result")
 	return err
-}
-
-func insertData(buf *bytes.Buffer) {
-	vals := make([]string, 16)
-	for i := range vals {
-		vals[i] = fmt.Sprintf("(%d,%.6f,%.3f,'%s','%s','%s','%s','%s','%s')",
-			i+1, randDouble(), randDecimal(), randString(),
-			randDatetime(), randTimestamp(), randEnum(), randSet(), randJson())
-	}
-	buf.WriteString("insert into t values ")
-	buf.WriteString(strings.Join(vals, ", "))
-	buf.WriteByte(';')
 }
 
 func naiveQueryDetect(sql string) bool {

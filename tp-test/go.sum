@@ -138,8 +138,6 @@ github.com/zyguan/just v0.0.0-20200303164907-cac852552279 h1:sFRkqExbmDrTP1hoVXy
 github.com/zyguan/just v0.0.0-20200303164907-cac852552279/go.mod h1:6kWQwdxguAiSPj8OrHtKNLHR55qbZyHgVIa6xfKdoPA=
 github.com/zyguan/sqlz v0.0.0-20200703075855-460d440f86de h1:ky/jVUdO5jiZvpe3D7zlbu+h91jMB/JdonJMoKInKvs=
 github.com/zyguan/sqlz v0.0.0-20200703075855-460d440f86de/go.mod h1:AutAgtYwB095YomYO7uf7AESmwV0VfVdyt/4kXFV3l0=
-github.com/zyguan/xs v0.0.0-20200801055926-90c4dd176818 h1:WpSj00MeF6bDURMs8nE7UWzwPPyAakqA4b6g9GJDw3c=
-github.com/zyguan/xs v0.0.0-20200801055926-90c4dd176818/go.mod h1:mB5jKg/5+pe4xBz+v3sioaJGWL4hL2HB+v67dxFUERg=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/multierr v1.1.0/go.mod h1:wR5kodmAFQ0UK8QlbwjlSNy0Z68gJhDJUG5sjR94q/0=

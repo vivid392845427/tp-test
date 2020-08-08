@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"strconv"
+	"strings"
 )
 
 // token sequence of one branch
@@ -14,10 +16,37 @@ type Seq struct {
 	PNumber int
 	// number of the Seq in the production
 	SNumber int
+	// Attributes
+	Weight float64
 }
 
 func NewSeq(items []Token) (seq *Seq) {
-	return &Seq{Items: items}
+	return &Seq{Weight: 1.0, Items: items}
+}
+
+func (s *Seq) Append(t Token) error {
+	attr, ok := t.(*attribute)
+	if !ok {
+		s.Items = append(s.Items, t)
+		return nil
+	}
+	raw := strings.SplitN(strings.Trim(attr.OriginString(), "[] "), "=", 2)
+	switch strings.TrimSpace(raw[0]) {
+	case "weight":
+		if len(raw) != 2 {
+			return errors.New("invalid attribute string: " + t.OriginString())
+		}
+		v, err := strconv.ParseFloat(raw[1], 64)
+		if err != nil {
+			return errors.New("invalid weight value: " + err.Error())
+		}
+		s.Weight = v
+	case "ignore", "omit":
+		s.Weight = 0
+	default:
+		return errors.New("unknown attribute string: " + t.OriginString())
+	}
+	return nil
 }
 
 func (s Seq) String() string {
@@ -134,7 +163,9 @@ func Parse(nextToken func() (Token, error)) ([]*CodeBlock, []*Production, error)
 			state = delimFetchedState
 		case delimFetchedState:
 			if isEOF(tkn) {
-				s.Items = append(s.Items, &terminal{val: ""})
+				if err := s.Append(&terminal{val: ""}); err != nil {
+					return nil, nil, err
+				}
 				p.AppendSeq(s)
 				prods = append(prods, p)
 				state = endState
@@ -142,14 +173,18 @@ func Parse(nextToken func() (Token, error)) ([]*CodeBlock, []*Production, error)
 			}
 			if tkn.OriginString() == "|" || isEOF(tkn) {
 				// multi delimiter will have empty alter
-				s.Items = append(s.Items, &terminal{val: ""})
+				if err := s.Append(&terminal{val: ""}); err != nil {
+					return nil, nil, err
+				}
 				p.AppendSeq(s)
 				s = NewSeq(nil)
 			} else if tkn.OriginString() == ":" {
 				continue
 			} else {
 				state = termFetchedState
-				s.Items = append(s.Items, tkn)
+				if err := s.Append(tkn); err != nil {
+					return nil, nil, err
+				}
 			}
 			// state after first term fetched
 		case termFetchedState:
@@ -171,7 +206,7 @@ func Parse(nextToken func() (Token, error)) ([]*CodeBlock, []*Production, error)
 					s = NewSeq(nil)
 				}
 				state = delimFetchedState
-			case *nonTerminal, *keyword, *terminal, *CodeBlock:
+			case *nonTerminal, *keyword, *terminal, *attribute, *CodeBlock:
 				// record last term
 				lastTerm = v
 				state = prepareNextProdState
@@ -180,13 +215,17 @@ func Parse(nextToken func() (Token, error)) ([]*CodeBlock, []*Production, error)
 		case prepareNextProdState:
 			switch v := tkn.(type) {
 			case *eof:
-				s.Items = append(s.Items, lastTerm)
+				if err := s.Append(lastTerm); err != nil {
+					return nil, nil, err
+				}
 				p.AppendSeq(s)
 				prods = append(prods, p)
 				state = endState
 			case *operator:
 				if v.val == "|" {
-					s.Items = append(s.Items, lastTerm)
+					if err := s.Append(lastTerm); err != nil {
+						return nil, nil, err
+					}
 					p.AppendSeq(s)
 					s = NewSeq(nil)
 				} else if v.val == ":" {
@@ -201,9 +240,11 @@ func Parse(nextToken func() (Token, error)) ([]*CodeBlock, []*Production, error)
 					p, pNumber = NewProduction(lastTerm, pNumber)
 				}
 				state = delimFetchedState
-			case *nonTerminal, *keyword, *terminal, *CodeBlock:
+			case *nonTerminal, *keyword, *terminal, *attribute, *CodeBlock:
 				// push last tern in Seq
-				s.Items = append(s.Items, lastTerm)
+				if err := s.Append(lastTerm); err != nil {
+					return nil, nil, err
+				}
 				lastTerm = v
 			}
 		}
