@@ -22,7 +22,7 @@
 
 init: create_table; insert_data
 
-txn: rand_querys
+txn: rand_queries
 
 create_table:
     create table t (
@@ -82,9 +82,9 @@ rand_c_double: { printf("%.6f", T.c_double.rand()) }
 rand_c_decimal: { printf("%.3f", T.c_decimal.rand()) }
 
 
-rand_querys:
+rand_queries:
     rand_query; rand_query; rand_query; rand_query
- |  [weight=9] rand_query; rand_querys
+ |  [weight=9] rand_query; rand_queries
 
 rand_query:
     [weight=0.6] common_select maybe_for_update

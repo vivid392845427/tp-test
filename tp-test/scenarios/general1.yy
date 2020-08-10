@@ -22,7 +22,7 @@
 
 init: create_table; insert_data
 
-txn: rand_querys
+txn: rand_queries
 
 create_table:
     create table t (
@@ -85,9 +85,9 @@ rand_c_decimal: { printf("%.3f", T.c_decimal.rand()) }
 union_or_union_all: union | union all
 insert_or_replace: insert | replace
 
-rand_querys:
+rand_queries:
     rand_query; rand_query; rand_query; rand_query
- |  [weight=9] rand_query; rand_querys
+ |  [weight=9] rand_query; rand_queries
 
 rand_query:
     [weight=0.3] common_select maybe_for_update
@@ -133,6 +133,7 @@ common_insert:
  |  insert_or_replace into t (c_int, c_str, c_datetime, c_double) values (rand_c_int, rand_c_str, rand_c_datetime, rand_c_double)
  |  insert_or_replace into t (c_int, c_str, c_timestamp, c_decimal) values (next_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal), (rand_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal)
  |  insert into t values rand_row, rand_row, next_row on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp)
+ |  insert into t values rand_row, rand_row, next_row on duplicate key update c_int = c_int + 1, c_str = concat(c_int, ':', c_str)
 
 common_delete:
     delete from t where c_int = rand_c_int
