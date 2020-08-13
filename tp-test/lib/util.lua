@@ -41,12 +41,35 @@ function Range:randt()
     return timef(self:randi())
 end
 
+local NamedRand = {}
+NamedRand.__index = NamedRand
+
+function NamedRand.new(name, rand)
+    return setmetatable({name = name, rand = rand}, NamedRand)
+end
+
+function NamedRand:val()
+    return self.rand()
+end
+
+function NamedRand:pval()
+    print(self:val())
+end
+
 function choice(items)
     return items[math.random(#items)]
 end
 
+function quota(s, m)
+    -- TODO: handle escape chars
+    m = m or "'"
+    return m .. s .. m
+end
+
 return {
+    col = NamedRand.new,
     seq = Seq.new,
     range = Range.new,
     choice = choice,
+    quota = quota,
 }

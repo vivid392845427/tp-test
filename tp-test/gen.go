@@ -83,6 +83,20 @@ func setup(L *lua.LState, out io.Writer) error {
 		fmt.Fprintf(out, format, args[:k]...)
 		return 0
 	}))
+	L.SetGlobal("sprintf", L.NewFunction(func(L *lua.LState) int {
+		format := L.CheckString(1)
+		args := make([]interface{}, L.GetTop()-1)
+		top := L.GetTop()
+		for i := 2; i <= top; i++ {
+			args[i-2] = L.Get(i)
+		}
+		k := strings.Count(format, "%") - strings.Count(format, "%%")
+		if len(args) < k {
+			k = len(args)
+		}
+		L.Push(lua.LString(fmt.Sprintf(format, args[:k]...)))
+		return 1
+	}))
 	L.SetGlobal("timef", L.NewFunction(func(L *lua.LState) int {
 		t := time.Now()
 		if L.GetTop() > 0 {
