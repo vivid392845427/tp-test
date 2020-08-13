@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/zyguan/sqlz"
 	"github.com/zyguan/sqlz/resultset"
 
 	. "github.com/zyguan/just"
@@ -34,8 +35,8 @@ type runABTestOptions struct {
 }
 
 func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions) error {
+	store := opts.Store
 
-	store, db1, db2 := opts.Store, opts.DB1, opts.DB2
 	if opts.Continue == nil {
 		opts.Continue = func() bool { return true }
 	}
@@ -68,35 +69,43 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 		dbName1 := "db1__" + strings.ReplaceAll(t.ID, "-", "_")
 		dbName2 := "db2__" + strings.ReplaceAll(t.ID, "-", "_")
 
-		if err1 := initTest(ctx, db1, dbName1, t); err1 != nil {
+		conn1, err1 := initTest(ctx, opts.DB1, dbName1, t)
+		if err1 != nil {
 			store.SetTest(t.ID, TestFailed, "init db1: "+err1.Error())
 			log.Printf("failed to init %s/%s: %v", opts.Tag1, dbName1, err1)
 			continue
 		}
-		if err2 := initTest(ctx, db2, dbName2, t); err2 != nil {
+		conn2, err2 := initTest(ctx, opts.DB2, dbName2, t)
+		if err2 != nil {
+			conn1.Close()
 			store.SetTest(t.ID, TestFailed, "init db2: "+err2.Error())
 			log.Printf("failed to init %s/%s: %v", opts.Tag2, dbName2, err2)
 			continue
 		}
+		closeConns := func() {
+			conn1.Close()
+			conn2.Close()
+		}
 
 		log.Printf("run test %s", t.ID)
 		for i := range t.Steps {
-			tx1, err1 := db1.BeginTx(ctx, nil)
+			tx1, err1 := conn1.BeginTx(ctx, nil)
 			if err1 != nil {
+				closeConns()
 				return fmt.Errorf("start txn #%d of test(%s) on %s: %v", i, t.ID, opts.Tag1, err1)
 			}
-			tx1.Exec("use " + dbName1)
-			tx2, err2 := db2.BeginTx(ctx, nil)
+			tx2, err2 := conn2.BeginTx(ctx, nil)
 			if err2 != nil {
 				tx1.Rollback()
+				closeConns()
 				return fmt.Errorf("start txn #%d of test(%s) on %s: %v", i, t.ID, opts.Tag2, err2)
 			}
-			tx2.Exec("use " + dbName2)
 
 			fail := func(err error) error {
 				defer func() { recover() }()
 				tx1.Rollback()
 				tx2.Rollback()
+				closeConns()
 				store.SetTest(t.ID, TestFailed, err.Error())
 				log.Printf("test(%s) failed at txn #%d: %v", t.ID, i, err)
 				close(failed)
@@ -112,11 +121,11 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 				return fail(fmt.Errorf("commit txn #%d: %v <> %v", i, err1, err2))
 			}
 
-			hs1, err1 := checkTables(ctx, db1, dbName1)
+			hs1, err1 := checkTables(ctx, opts.DB1, dbName1)
 			if err1 != nil {
 				return fail(fmt.Errorf("check table of %s after txn #%d: %v", opts.Tag1, i, err1))
 			}
-			hs2, err2 := checkTables(ctx, db2, dbName2)
+			hs2, err2 := checkTables(ctx, opts.DB1, dbName2)
 			if err2 != nil {
 				return fail(fmt.Errorf("check table of %s after txn #%d: %v", opts.Tag2, i, err2))
 			}
@@ -129,17 +138,17 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 
 		store.SetTest(t.ID, TestPassed, "")
 
-		db1.ExecContext(ctx, "drop database if exists "+dbName1)
-		db2.ExecContext(ctx, "drop database if exists "+dbName2)
+		conn1.ExecContext(ctx, "drop database if exists "+dbName1)
+		conn2.ExecContext(ctx, "drop database if exists "+dbName2)
+		closeConns()
 	}
 	return nil
 }
 
-func initTest(ctx context.Context, db *sql.DB, name string, t *Test) (err error) {
+func initTest(ctx context.Context, db *sql.DB, name string, t *Test) (conn *sql.Conn, err error) {
 	defer Return(&err)
-	Try(db.ExecContext(ctx, "create database "+name))
-	conn := Try(db.Conn(ctx)).(*sql.Conn)
-	defer conn.Close()
+	conn = Try(sqlz.Connect(ctx, db)).(*sql.Conn)
+	Try(conn.ExecContext(ctx, "create database "+name))
 	Try(conn.ExecContext(ctx, "use "+name))
 	for _, stmt := range t.InitSQL {
 		// it's ok for some of stmts in init_sql failed
@@ -172,7 +181,6 @@ func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]strin
 	return hs, nil
 }
 
-// FIXME show tables and check all
 func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
 	_, err := db.ExecContext(ctx, "admin check table "+name)
 	if err != nil {
