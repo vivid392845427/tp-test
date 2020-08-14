@@ -156,7 +156,7 @@ func (s *store) PutStmtResult(id string, seq int, tag string, result Result) err
 	if result.Err != nil {
 		errmsg = result.Err.Error()
 	}
-	_, err := s.db.Exec("insert into stmt_result (test_id, seq, tag, error, result, rows_affected, last_insert_id, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)",
+	_, err := s.db.Exec("insert into stmt_result (test_id, seq, tag, errmsg, result, rows_affected, last_insert_id, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)",
 		id, seq, tag, errmsg, result.Raw, result.RowsAffected, result.LastInsertId, time.Now().Unix())
 	return err
 }
@@ -187,7 +187,7 @@ func initDB(db *sqlz.DB) (err error) {
     test_id char(36) not null,
     seq int not null,
     tag varchar(40) not null,
-    error text,
+    errmsg text,
     result longblob,
     rows_affected int,
     last_insert_id int,

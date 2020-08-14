@@ -270,7 +270,7 @@ func whyTestCmd(g *global) *cobra.Command {
 			fmt.Printf("\n%d: %s\n", seq, stmt)
 
 			fmt.Println("\n```")
-			rows, err := db.Query("select tag, result, error from stmt_result where test_id = ? and seq = ? order by tag", id, seq)
+			rows, err := db.Query("select tag, result, errmsg from stmt_result where test_id = ? and seq = ? order by tag", id, seq)
 			if err != nil {
 				fmt.Println("oops: " + err.Error())
 			} else {
