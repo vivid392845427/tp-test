@@ -45,7 +45,7 @@ func genTest(opts genTestOptions) (test Test, err error) {
 
 	it.SetRoot(opts.TxnRoot)
 	for i := 0; i < opts.NumTxn; i++ {
-		txn := make(Txn, 0, 8)
+		txn := make(StmtList, 0, 8)
 		err = it.Visit(func(sql string) bool {
 			txn = append(txn, Stmt{Stmt: sql})
 			return it.PathInfo().Depth != 0
@@ -53,7 +53,7 @@ func genTest(opts genTestOptions) (test Test, err error) {
 		if err != nil {
 			return Test{}, err
 		}
-		test.Steps = append(test.Steps, txn)
+		test.Groups = append(test.Groups, txn)
 	}
 	return
 }

@@ -88,23 +88,11 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 		}
 
 		log.Printf("run test %s", t.ID)
-		for i := range t.Steps {
-			tx1, err1 := conn1.BeginTx(ctx, nil)
-			if err1 != nil {
-				closeConns()
-				return fmt.Errorf("start txn #%d of test(%s) on %s: %v", i, t.ID, opts.Tag1, err1)
-			}
-			tx2, err2 := conn2.BeginTx(ctx, nil)
-			if err2 != nil {
-				tx1.Rollback()
-				closeConns()
-				return fmt.Errorf("start txn #%d of test(%s) on %s: %v", i, t.ID, opts.Tag2, err2)
-			}
-
+		for i := range t.Groups {
 			fail := func(err error) error {
 				defer func() { recover() }()
-				tx1.Rollback()
-				tx2.Rollback()
+				conn1.ExecContext(ctx, "rollback")
+				conn2.ExecContext(ctx, "rollback")
 				closeConns()
 				store.SetTest(t.ID, TestFailed, err.Error())
 				log.Printf("test(%s) failed at txn #%d: %v", t.ID, i, err)
@@ -112,13 +100,8 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 				return err
 			}
 
-			if err := doTxn(ctx, opts, t, i, tx1, tx2); err != nil {
+			if err := doTxn(ctx, opts, t, i, conn1, conn2); err != nil {
 				return fail(err)
-			}
-
-			err1, err2 = tx1.Commit(), tx2.Commit()
-			if !validateErrs(err1, err2) {
-				return fail(fmt.Errorf("commit txn #%d: %v <> %v", i, err1, err2))
 			}
 
 			hs1, err1 := checkTables(ctx, opts.DB1, dbName1)
@@ -202,8 +185,8 @@ func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
 	}), nil
 }
 
-func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.Tx, tx2 *sql.Tx) error {
-	txn := t.Steps[i]
+func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, s1 *sql.Conn, s2 *sql.Conn) error {
+	txn := t.Groups[i]
 
 	record := func(seq int, tag string, rs *resultset.ResultSet, err error) {
 		if rs != nil {
@@ -221,10 +204,10 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.
 
 	for _, stmt := range txn {
 		ctx1, _ := context.WithTimeout(ctx, time.Duration(opts.QueryTimeout)*time.Second)
-		rs1, err1 := doStmt(ctx1, tx1, stmt)
+		rs1, err1 := doStmt(ctx1, s1, stmt)
 		record(stmt.Seq, opts.Tag1, rs1, err1)
 		ctx2, _ := context.WithTimeout(ctx, time.Duration(opts.QueryTimeout)*time.Second)
-		rs2, err2 := doStmt(ctx2, tx2, stmt)
+		rs2, err2 := doStmt(ctx2, s2, stmt)
 		record(stmt.Seq, opts.Tag2, rs2, err2)
 		if !validateErrs(err1, err2) {
 			return fmt.Errorf("errors mismatch: %v <> %v @(%s,%d) %q", err1, err2, t.ID, stmt.Seq, stmt.Stmt)
@@ -286,16 +269,16 @@ func unorderedDigest(rs *resultset.ResultSet, colFilter func(resultset.ColumnDef
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func doStmt(ctx context.Context, tx *sql.Tx, stmt Stmt) (*resultset.ResultSet, error) {
+func doStmt(ctx context.Context, s *sql.Conn, stmt Stmt) (*resultset.ResultSet, error) {
 	if stmt.IsQuery {
-		rows, err := tx.QueryContext(ctx, stmt.Stmt)
+		rows, err := s.QueryContext(ctx, stmt.Stmt)
 		if err != nil {
 			return nil, err
 		}
 		defer rows.Close()
 		return resultset.ReadFromRows(rows)
 	} else {
-		res, err := tx.ExecContext(ctx, stmt.Stmt)
+		res, err := s.ExecContext(ctx, stmt.Stmt)
 		if err != nil {
 			return nil, err
 		}

@@ -54,7 +54,7 @@
 
 init: create_table; insert_data
 
-txn: rand_queries
+txn: begin; rand_queries; commit
 
 create_table:
     create table t1 { T.current_table = 1 } table_defs;

@@ -45,10 +45,10 @@ type Test struct {
 	StartedAt  int64
 	FinishedAt int64
 	InitSQL    []string
-	Steps      []Txn
+	Groups     []StmtList
 }
 
-type Txn []Stmt
+type StmtList []Stmt
 
 type Stmt struct {
 	Seq     int
@@ -87,7 +87,7 @@ func (s *store) AddTest(test Test) (err error) {
 	defer tx.Rollback()
 
 	seq := 0
-	for i, txn := range test.Steps {
+	for i, txn := range test.Groups {
 		for _, stmt := range txn {
 			Try(tx.Exec("insert into stmt (test_id, seq, txn, stmt, is_query) values (?, ?, ?, ?, ?)",
 				test.ID, seq, i, stmt.Stmt, naiveQueryDetect(stmt.Stmt)))
@@ -138,7 +138,7 @@ func (s *store) NextPendingTest() (test *Test, err error) {
 				break
 			}
 		}
-		t.Steps = append(t.Steps, stmts[i:j])
+		t.Groups = append(t.Groups, stmts[i:j])
 		i = j
 	}
 
