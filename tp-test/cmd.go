@@ -91,14 +91,14 @@ func genTestCmd(g *global) *cobra.Command {
 					return err
 				}
 				if dryrun {
-					fmt.Printf("-- T%d.0\n", i)
+					fmt.Printf("-- #%d init\n", i)
 					for _, stmt := range t.InitSQL {
 						fmt.Println(stmt + ";")
 					}
-					for k, txn := range t.Steps {
-						fmt.Printf("-- T%d.%d\n", i, k+1)
+					for k, txn := range t.Groups {
+						fmt.Printf("-- #%d txn[%d]\n", i, k)
 						for _, stmt := range txn {
-							fmt.Println(stmt.Stmt+"; -- query:", naiveQueryDetect(stmt.Stmt))
+							fmt.Println(stmt.Stmt + ";")
 						}
 					}
 				} else {
@@ -222,13 +222,8 @@ func whyTestCmd(g *global) *cobra.Command {
 			}
 
 			dumpStmts := func(seq int) {
-				var (
-					stmt    Stmt
-					lastTxn = -1
-				)
-				fmt.Println("-- init")
 				for _, stmt := range t.InitSQL {
-					fmt.Println(stmt + ";")
+					fmt.Println("/* INIT */ " + stmt + ";")
 				}
 
 				rows, err := db.Query("select stmt, txn from stmt where test_id = ? and seq <= ? order by seq", id, seq)
@@ -238,19 +233,12 @@ func whyTestCmd(g *global) *cobra.Command {
 				}
 				defer rows.Close()
 				for rows.Next() {
+					var stmt Stmt
 					if err := rows.Scan(&stmt.Stmt, &stmt.Txn); err != nil {
 						fmt.Println("oops: " + err.Error())
 						return
 					}
-					if lastTxn != stmt.Txn {
-						if lastTxn != -1 {
-							fmt.Println("commit;")
-						}
-						fmt.Printf("-- txn:%d\n", stmt.Txn)
-						fmt.Println("begin;")
-					}
-					fmt.Println(stmt.Stmt + ";")
-					lastTxn = stmt.Txn
+					fmt.Printf("/* T%-3d */ %s;\n", stmt.Txn, stmt.Stmt)
 				}
 				if err := rows.Err(); err != nil {
 					fmt.Println("oops: " + err.Error())
