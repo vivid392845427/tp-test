@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math/rand"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +22,10 @@ const (
 	TestFailed  = "Failed"
 	TestPassed  = "Passed"
 	TestUnknown = "Unknown"
+
+	ModeDefault      = ""
+	ModeSequence     = "Sequence"
+	ModeMultiSession = "MultiSession"
 )
 
 type Result struct {
@@ -40,12 +46,54 @@ type Store interface {
 
 type Test struct {
 	ID         string
+	Mode       string
 	Status     string
 	Message    string
 	StartedAt  int64
 	FinishedAt int64
 	InitSQL    []string
 	Groups     []StmtList
+}
+
+func (t *Test) Reorder() {
+	seq := 0
+	for i := range t.Groups {
+		for j := range t.Groups[i] {
+			t.Groups[i][j].Txn = i
+			t.Groups[i][j].Seq = seq
+			seq += 1
+		}
+	}
+	t.Mode = ModeSequence
+}
+
+func (t *Test) Shuffle() {
+	xs := make([]int, 0, 64)
+	ys := make([]int, len(t.Groups))
+	for i, g := range t.Groups {
+		for _ = range g {
+			xs = append(xs, i)
+		}
+	}
+	rand.Shuffle(len(xs), func(i, j int) { xs[i], xs[j] = xs[j], xs[i] })
+	for seq, x := range xs {
+		t.Groups[x][ys[x]].Seq = seq
+		ys[x] += 1
+	}
+	t.Mode = ModeMultiSession
+}
+
+func (t *Test) OrderedStmts() StmtList {
+	size := 0
+	for _, g := range t.Groups {
+		size += len(g)
+	}
+	stmts := make([]Stmt, 0, size)
+	for _, lst := range t.Groups {
+		stmts = append(stmts, lst...)
+	}
+	sort.Slice(stmts, func(i, j int) bool { return stmts[i].Seq < stmts[j].Seq })
+	return stmts
 }
 
 type StmtList []Stmt
@@ -86,16 +134,14 @@ func (s *store) AddTest(test Test) (err error) {
 	tx := Try(s.db.Begin()).(*sql.Tx)
 	defer tx.Rollback()
 
-	seq := 0
-	for i, txn := range test.Groups {
+	for _, txn := range test.Groups {
 		for _, stmt := range txn {
 			Try(tx.Exec("insert into stmt (test_id, seq, txn, stmt, is_query) values (?, ?, ?, ?, ?)",
-				test.ID, seq, i, stmt.Stmt, naiveQueryDetect(stmt.Stmt)))
-			seq += 1
+				test.ID, stmt.Seq, stmt.Txn, stmt.Stmt, naiveQueryDetect(stmt.Stmt)))
 		}
 	}
 	init := Try(json.Marshal(test.InitSQL)).([]byte)
-	Try(tx.Exec("insert into test (id, init_sql, status) values (?, ?, ?)", test.ID, string(init), TestPending))
+	Try(tx.Exec("insert into test (id, mode, init_sql, status) values (?, ?, ?, ?)", test.ID, test.Mode, string(init), TestPending))
 
 	return tx.Commit()
 }
@@ -116,7 +162,7 @@ func (s *store) NextPendingTest() (test *Test, err error) {
 	tx := Try(s.db.Begin()).(*sql.Tx)
 	defer tx.Rollback()
 
-	Try(tx.QueryRow("select id, init_sql from test where status = ? limit 1 for update", t.Status).Scan(&t.ID, &buf))
+	Try(tx.QueryRow("select id, mode, init_sql from test where status = ? limit 1 for update", t.Status).Scan(&t.ID, &t.Mode, &buf))
 	Try(tx.Exec("update test set status = ?, started_at = ? where id = ?", TestRunning, t.StartedAt, t.ID))
 	Try(json.Unmarshal(buf, &t.InitSQL))
 
@@ -165,35 +211,36 @@ func initDB(db *sqlz.DB) (err error) {
 	defer Return(&err)
 
 	db.MustExec(`create table test (
-    id char(36) not null,
-    init_sql longtext not null,
-    status varchar(20),
-    started_at bigint default 0,
-    finished_at bigint default 0,
-    message text,
-    primary key (id),
-    key (status)
+	id char(36) not null,
+	mode varchar(40) not null,
+	init_sql longtext not null,
+	status varchar(20),
+	started_at bigint default 0,
+	finished_at bigint default 0,
+	message text,
+	primary key (id),
+	key (status)
 )`)
 	db.MustExec(`create table stmt (
-    test_id char(36) not null,
-    seq int not null,
-    txn int not null,
-    stmt text not null,
-    is_query bool,
-    primary key (test_id, seq)
+	test_id char(36) not null,
+	seq int not null,
+	txn int not null,
+	stmt text not null,
+	is_query bool,
+	primary key (test_id, seq)
 )`)
 	db.MustExec(`create table stmt_result (
-    id bigint not null auto_increment,
-    test_id char(36) not null,
-    seq int not null,
-    tag varchar(40) not null,
-    errmsg text,
-    result longblob,
-    rows_affected int,
-    last_insert_id int,
-    created_at int not null,
-    primary key (id),
-    key (test_id, seq)
+	id bigint not null auto_increment,
+	test_id char(36) not null,
+	seq int not null,
+	tag varchar(40) not null,
+	errmsg text,
+	result longblob,
+	rows_affected int,
+	last_insert_id int,
+	created_at int not null,
+	primary key (id),
+	key (test_id, seq)
 )`)
 
 	return nil

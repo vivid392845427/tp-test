@@ -98,7 +98,7 @@ func genTestCmd(g *global) *cobra.Command {
 					for k, txn := range t.Groups {
 						fmt.Printf("-- #%d txn[%d]\n", i, k)
 						for _, stmt := range txn {
-							fmt.Println(stmt.Stmt + ";")
+							fmt.Printf("/* %3d */ %s;\n", stmt.Seq, stmt.Stmt)
 						}
 					}
 				} else {
@@ -113,6 +113,7 @@ func genTestCmd(g *global) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&tests, "test", 1, "number of test to generate")
 	cmd.Flags().BoolVar(&dryrun, "dry-run", false, "dry run")
+	cmd.Flags().StringVar(&opts.Mode, "mode", "", "test mode (Sequence, MultiSession)")
 	cmd.Flags().StringVar(&opts.InitRoot, "init-root", "init", "entry rule of initialization sql")
 	cmd.Flags().StringVar(&opts.TxnRoot, "txn-root", "txn", "entry rule of transaction")
 	cmd.Flags().IntVar(&opts.RecurLimit, "recur-limit", 15, "max recursion level for sql generation")

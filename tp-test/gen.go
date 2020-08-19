@@ -18,6 +18,7 @@ import (
 
 type genTestOptions struct {
 	Grammar    string
+	Mode       string
 	InitRoot   string
 	TxnRoot    string
 	RecurLimit int
@@ -54,6 +55,10 @@ func genTest(opts genTestOptions) (test Test, err error) {
 			return Test{}, err
 		}
 		test.Groups = append(test.Groups, txn)
+	}
+	test.Reorder()
+	if opts.Mode == ModeMultiSession {
+		test.Shuffle()
 	}
 	return
 }
