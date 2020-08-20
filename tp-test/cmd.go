@@ -11,6 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/go-randgen/tp-test/util"
+
+	"github.com/pingcap/go-randgen/tp-test/gen"
+
 	"github.com/spf13/cobra"
 	"github.com/zyguan/sqlz/resultset"
 	"golang.org/x/sync/errgroup"
@@ -68,7 +72,8 @@ func clearCmd(g *global) *cobra.Command {
 
 func genTestCmd(g *global) *cobra.Command {
 	var (
-		opts   genTestOptions
+		opts   gen.GenTestOptions
+		mode   string
 		tests  int
 		dryrun bool
 	)
@@ -86,9 +91,24 @@ func genTestCmd(g *global) *cobra.Command {
 			}
 			opts.Grammar = string(yy)
 			for i := 0; i < tests; i++ {
-				t, err := genTest(opts)
+				tt, err := gen.GenTest(opts)
 				if err != nil {
 					return err
+				}
+				t := Test{
+					InitSQL: tt.Init,
+					Groups:  make([]StmtList, len(tt.TxnList)),
+				}
+				for i, txn := range tt.TxnList {
+					t.Groups[i] = make(StmtList, len(txn))
+					for j, q := range txn {
+						t.Groups[i][j].Stmt = q
+						t.Groups[i][j].IsQuery = util.IsQuery(q)
+					}
+				}
+				t.Reorder()
+				if mode == ModeMultiSession {
+					t.Shuffle()
 				}
 				if dryrun {
 					fmt.Printf("-- #%d init\n", i)
@@ -113,11 +133,11 @@ func genTestCmd(g *global) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&tests, "test", 1, "number of test to generate")
 	cmd.Flags().BoolVar(&dryrun, "dry-run", false, "dry run")
-	cmd.Flags().StringVar(&opts.Mode, "mode", "", "test mode (Sequence, MultiSession)")
+	cmd.Flags().StringVar(&mode, "mode", "", "test mode (Sequence, MultiSession)")
 	cmd.Flags().StringVar(&opts.InitRoot, "init-root", "init", "entry rule of initialization sql")
 	cmd.Flags().StringVar(&opts.TxnRoot, "txn-root", "txn", "entry rule of transaction")
 	cmd.Flags().IntVar(&opts.RecurLimit, "recur-limit", 15, "max recursion level for sql generation")
-	cmd.Flags().IntVar(&opts.NumTxn, "txn", 5, "number of transactions per test")
+	cmd.Flags().IntVar(&opts.TxnCount, "txn", 5, "number of transactions per test")
 	cmd.Flags().BoolVar(&opts.Debug, "debug", false, "enable debug option of generator")
 	return cmd
 }

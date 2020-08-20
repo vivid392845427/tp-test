@@ -1,4 +1,4 @@
-package main
+package gen
 
 import (
 	"errors"
@@ -14,19 +14,23 @@ import (
 	sqlgen "github.com/pingcap/go-randgen/grammar/sql_generator"
 )
 
-//go:generate go run modernc.org/assets -d lib/ -o lib.generated.go --map luaLibs
+//go:generate go run modernc.org/assets -d lib/ -o lib.generated.go --map luaLibs --package gen
 
-type genTestOptions struct {
+type Test struct {
+	Init    []string
+	TxnList [][]string
+}
+
+type GenTestOptions struct {
 	Grammar    string
-	Mode       string
 	InitRoot   string
 	TxnRoot    string
+	TxnCount   int
 	RecurLimit int
-	NumTxn     int
 	Debug      bool
 }
 
-func genTest(opts genTestOptions) (test Test, err error) {
+func GenTest(opts GenTestOptions) (test Test, err error) {
 	rand.Seed(time.Now().UnixNano())
 
 	it, err := sqlgen.NewSQLGen(opts.Grammar, nil, setup)
@@ -37,7 +41,7 @@ func genTest(opts genTestOptions) (test Test, err error) {
 
 	it.SetRoot(opts.InitRoot)
 	err = it.Visit(func(sql string) bool {
-		test.InitSQL = append(test.InitSQL, sql)
+		test.Init = append(test.Init, sql)
 		return it.PathInfo().Depth != 0
 	})
 	if err != nil {
@@ -45,20 +49,16 @@ func genTest(opts genTestOptions) (test Test, err error) {
 	}
 
 	it.SetRoot(opts.TxnRoot)
-	for i := 0; i < opts.NumTxn; i++ {
-		txn := make(StmtList, 0, 8)
+	for i := 0; i < opts.TxnCount; i++ {
+		txn := make([]string, 0, 8)
 		err = it.Visit(func(sql string) bool {
-			txn = append(txn, Stmt{Stmt: sql})
+			txn = append(txn, sql)
 			return it.PathInfo().Depth != 0
 		})
 		if err != nil {
 			return Test{}, err
 		}
-		test.Groups = append(test.Groups, txn)
-	}
-	test.Reorder()
-	if opts.Mode == ModeMultiSession {
-		test.Shuffle()
+		test.TxnList = append(test.TxnList, txn)
 	}
 	return
 }

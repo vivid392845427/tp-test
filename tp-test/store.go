@@ -7,7 +7,6 @@ import (
 	"errors"
 	"math/rand"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -137,7 +136,7 @@ func (s *store) AddTest(test Test) (err error) {
 	for _, txn := range test.Groups {
 		for _, stmt := range txn {
 			Try(tx.Exec("insert into stmt (test_id, seq, txn, stmt, is_query) values (?, ?, ?, ?, ?)",
-				test.ID, stmt.Seq, stmt.Txn, stmt.Stmt, naiveQueryDetect(stmt.Stmt)))
+				test.ID, stmt.Seq, stmt.Txn, stmt.Stmt, stmt.IsQuery))
 		}
 	}
 	init := Try(json.Marshal(test.InitSQL)).([]byte)
@@ -249,14 +248,4 @@ func initDB(db *sqlz.DB) (err error) {
 func clearDB(db *sqlz.DB) error {
 	_, err := db.Exec("drop table if exists test, stmt, stmt_result")
 	return err
-}
-
-func naiveQueryDetect(sql string) bool {
-	sql = strings.ToLower(strings.TrimSpace(sql))
-	for _, w := range []string{"select ", "show ", "admin show "} {
-		if strings.HasPrefix(sql, w) {
-			return true
-		}
-	}
-	return false
 }

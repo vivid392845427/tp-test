@@ -1,4 +1,4 @@
-package main
+package gen
 
 var (
 	// from: https://github.com/moby/moby/blob/master/pkg/namesgenerator/names-generator.go

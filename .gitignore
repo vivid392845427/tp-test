@@ -14,6 +14,6 @@ go-randgen-darwin
 cover.out
 coverage.html
 dump/
-out
-gen
+/out
+/gen
 /tp-test/tp-test
