@@ -232,7 +232,7 @@ select_from_t2_with_t1:
     select { print(T.current_col) } from t2 where predicates
 
 rand_assignments:
-    rand_assignment
+    [weight=9] rand_assignment
  |  rand_assignment, rand_assignments
 
 rand_assignment:

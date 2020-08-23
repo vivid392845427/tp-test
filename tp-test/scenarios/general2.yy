@@ -159,7 +159,7 @@ agg_select:
     select count(*) from t where predicates
  |  select sum(c_int) from t where predicates
 
-assignments: [weight=3] assignment | assignment, assignments
+assignments: [weight=9] assignment | assignment, assignments
 
 assignment:
     { T.cur_col = T.rand_col(); print(T.cur_col.name) } = rand_col_val
