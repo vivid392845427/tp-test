@@ -354,10 +354,10 @@ func doStmts(ctx context.Context, opts runABTestOptions, id string, stmts StmtLi
 		if h1 != h2 {
 			return fmt.Errorf("result digests mismatch: %s != %s @(%s,%d) %q", h1, h2, id, stmt.Seq, stmt.Stmt)
 		}
-		if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
-			return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
-				rs1.ExecResult().RowsAffected, rs2.ExecResult().RowsAffected, id, stmt.Seq, stmt.Stmt)
-		}
+		//if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
+		//	return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
+		//		rs1.ExecResult().RowsAffected, rs2.ExecResult().RowsAffected, id, stmt.Seq, stmt.Stmt)
+		//}
 	}
 	return nil
 }
