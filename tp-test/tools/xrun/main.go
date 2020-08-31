@@ -38,6 +38,8 @@ type options struct {
 	mode    string
 	input   string
 	verbose bool
+
+	blockTime time.Duration
 }
 
 func main() {
@@ -50,6 +52,7 @@ func main() {
 	flag.StringVar(&opts.mode, "m", modeEval, "run mode (eval, rand)")
 	flag.StringVar(&opts.input, "i", "", "input file")
 	flag.BoolVar(&opts.verbose, "v", false, "verbose (show select results)")
+	flag.DurationVar(&opts.blockTime, "block-time", 2*time.Second, "max wait time to run a stmt synchronously")
 
 	flag.Parse()
 
@@ -117,7 +120,7 @@ func mustEval(ex *Executor, ts [][3]string, opts options) {
 			fmt.Println(line)
 			return stmt
 		}, ExecOptions{
-			WaitAfter: 3 * time.Second,
+			WaitAfter: opts.blockTime,
 			Callback:  rdump(sess, opts.verbose),
 		})).(ExecStatus)
 		if status == ExecRunning {
@@ -167,7 +170,7 @@ func mustRand(ex *Executor, ts [][3]string, opts options) {
 			return stmt
 		}, ExecOptions{
 			WaitBefore: 100 * time.Millisecond,
-			WaitAfter:  time.Second,
+			WaitAfter:  opts.blockTime,
 			Callback:   rdump(s, opts.verbose),
 		})).(ExecStatus)
 		if status == ExecRunning {
