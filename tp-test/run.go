@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -262,7 +263,7 @@ func runMultiSession(ctx context.Context, failed chan struct{}, opts runABTestOp
 	}
 	for t := range hs2 {
 		if hs1[t] != hs2[t] {
-			return fail(fmt.Errorf("data mismatch: %s != %s @%s", hs1[t], hs2[t], t))
+			return fail(fmt.Errorf("data mismatch @%s", t))
 		}
 	}
 	return nil
@@ -352,12 +353,8 @@ func doStmts(ctx context.Context, opts runABTestOptions, id string, stmts StmtLi
 			h1, h2 = rs1.DataDigest(), rs2.DataDigest()
 		}
 		if h1 != h2 {
-			return fmt.Errorf("result digests mismatch: %s != %s @(%s,%d) %q", h1, h2, id, stmt.Seq, stmt.Stmt)
+			return fmt.Errorf("result digests mismatch @(%s,%d) %q", id, stmt.Seq, stmt.Stmt)
 		}
-		//if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
-		//	return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
-		//		rs1.ExecResult().RowsAffected, rs2.ExecResult().RowsAffected, id, stmt.Seq, stmt.Stmt)
-		//}
 	}
 	return nil
 }
@@ -368,14 +365,14 @@ func doStmt(ctx context.Context, c connector, stmt Stmt) (*resultset.ResultSet, 
 		return nil, err
 	}
 	if stmt.IsQuery {
-		rows, err := s.QueryContext(ctx, stmt.Stmt)
+		rows, err := s.QueryContext(ctx, "/* tp-test:q:"+stmt.TestID+":"+strconv.Itoa(stmt.Seq)+" */ "+stmt.Stmt)
 		if err != nil {
 			return nil, err
 		}
 		defer rows.Close()
 		return resultset.ReadFromRows(rows)
 	} else {
-		res, err := s.ExecContext(ctx, stmt.Stmt)
+		res, err := s.ExecContext(ctx, "/* tp-test:e:"+stmt.TestID+":"+strconv.Itoa(stmt.Seq)+" */ "+stmt.Stmt)
 		if err != nil {
 			return nil, err
 		}
