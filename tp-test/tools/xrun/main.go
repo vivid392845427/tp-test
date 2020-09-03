@@ -114,17 +114,38 @@ func rdump(s string, v bool) func(r *resultset.ResultSet, e error) {
 }
 
 func mustEval(ex *Executor, ts [][3]string, opts options) {
-	for _, t := range ts {
-		line, sess, stmt := t[0], t[1], t[2]
-		status := Try(ex.Execute(sess, func() string {
-			fmt.Println(line)
-			return stmt
-		}, ExecOptions{
-			WaitAfter: opts.blockTime,
-			Callback:  rdump(sess, opts.verbose),
-		})).(ExecStatus)
-		if status == ExecRunning {
-			fmt.Println("--", sess, "is blocked")
+	type node struct {
+		t    [3]string
+		next *node
+	}
+	head := new(node)
+	for i := 0; i < len(ts); i++ {
+		head.next = &node{ts[len(ts)-i-1], head.next}
+	}
+	for head.next != nil {
+		blocked := map[string]bool{}
+		for p := head; p.next != nil; p = p.next {
+			line, sess, stmt := p.next.t[0], p.next.t[1], p.next.t[2]
+			if blocked[sess] {
+				continue
+			}
+			status := Try(ex.Execute(sess, func() string {
+				fmt.Println(line)
+				return stmt
+			}, ExecOptions{
+				WaitBefore: 100 * time.Millisecond,
+				WaitAfter:  opts.blockTime,
+				Callback:   rdump(sess, opts.verbose),
+			})).(ExecStatus)
+			if status == ExecBlocked {
+				blocked[sess] = true
+				continue
+			}
+			if status == ExecRunning {
+				fmt.Println("--", sess, "is blocked")
+			}
+			p.next = p.next.next
+			break
 		}
 	}
 }
