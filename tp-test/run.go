@@ -114,7 +114,7 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 				return err
 			}
 
-			if err := doTxn(ctx, opts, t, i, conn1, conn2); err != nil {
+			if err := doStmts(ctx, opts, t, i, conn1, conn2); err != nil {
 				return fail(err)
 			}
 
@@ -214,7 +214,7 @@ func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
 	}), nil
 }
 
-func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, s1 *sql.Conn, s2 *sql.Conn) error {
+func doStmts(ctx context.Context, opts runABTestOptions, t *Test, i int, s1 *sql.Conn, s2 *sql.Conn) error {
 	txn := t.Groups[i]
 
 	record := func(seq int, tag string, rs *resultset.ResultSet, err error) {
@@ -255,10 +255,10 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, s1 *sql.C
 		if h1 != h2 {
 			return fmt.Errorf("result digests mismatch: %s != %s @(%s,%d) %q", h1, h2, t.ID, stmt.Seq, stmt.Stmt)
 		}
-		if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
-			return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
-				rs1.ExecResult().RowsAffected, rs2.ExecResult().RowsAffected, t.ID, stmt.Seq, stmt.Stmt)
-		}
+		//if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
+		//	return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
+		//		rs1.ExecResult().RowsAffected, rs2.ExecResult().RowsAffected, t.ID, stmt.Seq, stmt.Stmt)
+		//}
 	}
 	return nil
 }
