@@ -1,16 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"math/rand"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -128,7 +124,7 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 			}
 			for t := range hs2 {
 				if hs1[t] != hs2[t] {
-					return fail(fmt.Errorf("data mismatch after txn #%d: %s != %s @%s", i, hs1[t], hs2[t], t))
+					return fail(fmt.Errorf("data mismatch @%s", t))
 				}
 			}
 		}
@@ -209,8 +205,8 @@ func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return unorderedDigest(rs, func(col resultset.ColumnDef) bool {
-		return col.Type != "JSON"
+	return rs.UnorderedDigest(func(i int, j int, raw []byte) bool {
+		return rs.ColumnDef(j).Type != "JSON"
 	}), nil
 }
 
@@ -248,12 +244,12 @@ func doStmts(ctx context.Context, opts runABTestOptions, t *Test, i int, s1 *sql
 		h1, h2 := "", ""
 		if q := strings.ToLower(stmt.Stmt); stmt.IsQuery && rs1.NRows() == rs2.NRows() && rs1.NRows() > 1 &&
 			(!strings.Contains(q, "order by") || strings.Contains(q, "force-unordered")) {
-			h1, h2 = unorderedDigest(rs1, nil), unorderedDigest(rs2, nil)
+			h1, h2 = rs1.UnorderedDigest(), rs2.UnorderedDigest()
 		} else {
 			h1, h2 = rs1.DataDigest(), rs2.DataDigest()
 		}
 		if h1 != h2 {
-			return fmt.Errorf("result digests mismatch: %s != %s @(%s,%d) %q", h1, h2, t.ID, stmt.Seq, stmt.Stmt)
+			return fmt.Errorf("result digests mismatch @(%s,%d) %q", t.ID, stmt.Seq, stmt.Stmt)
 		}
 		//if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
 		//	return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
@@ -263,51 +259,16 @@ func doStmts(ctx context.Context, opts runABTestOptions, t *Test, i int, s1 *sql
 	return nil
 }
 
-type rows [][]byte
-
-func (r rows) Len() int { return len(r) }
-
-func (r rows) Less(i, j int) bool { return bytes.Compare(r[i], r[j]) < 0 }
-
-func (r rows) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
-
-func unorderedDigest(rs *resultset.ResultSet, colFilter func(resultset.ColumnDef) bool) string {
-	if colFilter == nil {
-		colFilter = func(_ resultset.ColumnDef) bool { return true }
-	}
-	cols := make([]int, 0, rs.NCols())
-	for i := 0; i < rs.NCols(); i++ {
-		if colFilter(rs.ColumnDef(i)) {
-			cols = append(cols, i)
-		}
-	}
-	digests := make(rows, rs.NRows())
-	for i := 0; i < rs.NRows(); i++ {
-		h := sha1.New()
-		for _, j := range cols {
-			raw, _ := rs.RawValue(i, j)
-			h.Write(raw)
-		}
-		digests[i] = h.Sum(nil)
-	}
-	sort.Sort(digests)
-	h := sha1.New()
-	for _, digest := range digests {
-		h.Write(digest)
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 func doStmt(ctx context.Context, s *sql.Conn, stmt Stmt) (*resultset.ResultSet, error) {
 	if stmt.IsQuery {
-		rows, err := s.QueryContext(ctx, stmt.Stmt)
+		rows, err := s.QueryContext(ctx, "/* tp-test:q:"+stmt.TestID+":"+strconv.Itoa(stmt.Seq)+" */ "+stmt.Stmt)
 		if err != nil {
 			return nil, err
 		}
 		defer rows.Close()
 		return resultset.ReadFromRows(rows)
 	} else {
-		res, err := s.ExecContext(ctx, stmt.Stmt)
+		res, err := s.ExecContext(ctx, "/* tp-test:e:"+stmt.TestID+":"+strconv.Itoa(stmt.Seq)+" */ "+stmt.Stmt)
 		if err != nil {
 			return nil, err
 		}

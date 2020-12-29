@@ -136,8 +136,8 @@ github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 h1:1b6PAtenNyhsmo/
 github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036/go.mod h1:gqRgreBUhTSL0GeU64rtZ3Uq3wtjOa/TB2YfrtkCbVQ=
 github.com/zyguan/just v0.0.0-20200303164907-cac852552279 h1:sFRkqExbmDrTP1hoVXyzLUOrM/M780ivDkSNMdA9UxE=
 github.com/zyguan/just v0.0.0-20200303164907-cac852552279/go.mod h1:6kWQwdxguAiSPj8OrHtKNLHR55qbZyHgVIa6xfKdoPA=
-github.com/zyguan/sqlz v0.0.0-20200703075855-460d440f86de h1:ky/jVUdO5jiZvpe3D7zlbu+h91jMB/JdonJMoKInKvs=
-github.com/zyguan/sqlz v0.0.0-20200703075855-460d440f86de/go.mod h1:AutAgtYwB095YomYO7uf7AESmwV0VfVdyt/4kXFV3l0=
+github.com/zyguan/sqlz v0.0.0-20201223085349-8d496c5b18b2 h1:J+XPMrTEzyGV7OX55b2ahSyY4l39S5DfHYJaTeqc/yQ=
+github.com/zyguan/sqlz v0.0.0-20201223085349-8d496c5b18b2/go.mod h1:AutAgtYwB095YomYO7uf7AESmwV0VfVdyt/4kXFV3l0=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/multierr v1.1.0/go.mod h1:wR5kodmAFQ0UK8QlbwjlSNy0Z68gJhDJUG5sjR94q/0=
