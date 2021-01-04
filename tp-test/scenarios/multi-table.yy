@@ -80,8 +80,8 @@ key_c_timestamp: [weight=2] key_c_timestamp_part | , unique key(c_timestamp)
 
 table_defs:
     (table_cols table_full_keys)
- |  (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) parted_by_int { T.count_parted = T.count_parted + 1 }
- |  (table_cols, primary key ({ print(util.choice({'c_datetime', 'c_int, c_datetime'})) }) table_part_keys) parted_by_time { T.count_parted = T.count_parted + 1 }
+ |  [omit] (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) parted_by_int { T.count_parted = T.count_parted + 1 }
+ |  [omit] (table_cols, primary key ({ print(util.choice({'c_datetime', 'c_int, c_datetime'})) }) table_part_keys) parted_by_time { T.count_parted = T.count_parted + 1 }
 
 table_cols:
     c_int int,

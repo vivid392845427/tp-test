@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -63,14 +62,7 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				log.Printf("no more test")
-				select {
-				case <-failed:
-					return nil
-				case <-ctx.Done():
-					return nil
-				case <-time.After(time.Duration(rand.Intn(10*opts.Threads)) * time.Second):
-					continue
-				}
+				return nil
 			}
 			return err
 		}
@@ -241,12 +233,19 @@ func doStmts(ctx context.Context, opts runABTestOptions, t *Test, i int, s1 *sql
 			log.Printf("skip query error: [%v] [%v] @(%s,%d)", err1, err2, t.ID, stmt.Seq)
 			continue
 		}
+		cellFilter := func(i int, j int, raw []byte) bool {
+			if strings.Contains(stmt.Stmt, "union") {
+				typ := rs1.ColumnDef(j).Type
+				return typ != "FLOAT" && typ != "DOUBLE" && typ != "DECIMAL"
+			}
+			return true
+		}
 		h1, h2 := "", ""
 		if q := strings.ToLower(stmt.Stmt); stmt.IsQuery && rs1.NRows() == rs2.NRows() && rs1.NRows() > 1 &&
 			(!strings.Contains(q, "order by") || strings.Contains(q, "force-unordered")) {
-			h1, h2 = rs1.UnorderedDigest(), rs2.UnorderedDigest()
+			h1, h2 = rs1.UnorderedDigest(cellFilter), rs2.UnorderedDigest(cellFilter)
 		} else {
-			h1, h2 = rs1.DataDigest(), rs2.DataDigest()
+			h1, h2 = rs1.DataDigest(cellFilter), rs2.DataDigest(cellFilter)
 		}
 		if h1 != h2 {
 			return fmt.Errorf("result digests mismatch @(%s,%d) %q", t.ID, stmt.Seq, stmt.Stmt)
