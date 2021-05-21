@@ -11,16 +11,16 @@
         c_decimal = { range = util.range(10) },
 		
 	collations = {'character set utf8mb4 collate utf8mb4_general_ci',
-		      'character set utf8mb4 collate utf8mb4_unicode_ci',
-		      'character set utf8mb4 collate utf8mb4_bin',
-		      'character set utf8 collate utf8_bin',
-		      'character set utf8 collate utf8_general_ci',
-		      'character set utf8 collate utf8_unicode_ci',
+                      'character set utf8mb4 collate utf8mb4_unicode_ci',
+                      'character set utf8mb4 collate utf8mb4_bin',
+                      'character set utf8 collate utf8_bin',
+                      'character set utf8 collate utf8_general_ci',
+                      'character set utf8 collate utf8_unicode_ci',
                       'character set binary collate binary',
                       'character set ascii collate ascii_bin',
-		      'character set latin1 collate latin1_bin'
-		     },
-	 c_str_len = {range = util.range(1, 40)},
+                      'character set latin1 collate latin1_bin'
+                     },
+        c_str_len = {range = util.range(1, 40)},
     }
 
     T.c_int.rand = function() return T.c_int.seq:rand() end
@@ -43,8 +43,8 @@ create_table:
     create table t (
         c_int int,
         c_str varchar(40) rand_collation,
-	v_str varchar(40) as (sub_str) virtual,
-	s_str varchar(40) as (sub_str) stored,			
+        v_str varchar(40) as (sub_str) virtual,
+        s_str varchar(40) as (sub_str) stored,			
         c_datetime datetime,
         c_timestamp timestamp,
         c_double double,
