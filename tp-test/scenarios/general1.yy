@@ -9,18 +9,18 @@
         c_timestamp = { range = util.range(1577836800, 1593561599) },
         c_double = { range = util.range(100) },
         c_decimal = { range = util.range(10) },
-		
-	collations = {'character set utf8mb4 collate utf8mb4_general_ci',
-                      'character set utf8mb4 collate utf8mb4_unicode_ci',
-                      'character set utf8mb4 collate utf8mb4_bin',
-                      'character set utf8 collate utf8_bin',
-                      'character set utf8 collate utf8_general_ci',
-                      'character set utf8 collate utf8_unicode_ci',
-                      'character set binary collate binary',
-                      'character set ascii collate ascii_bin',
-                      'character set latin1 collate latin1_bin'
-                     },
-        c_str_len = {range = util.range(1, 40)},
+        
+    collations = {'character set utf8mb4 collate utf8mb4_general_ci',
+                  'character set utf8mb4 collate utf8mb4_unicode_ci',
+                  'character set utf8mb4 collate utf8mb4_bin',
+                  'character set utf8 collate utf8_bin',
+                  'character set utf8 collate utf8_general_ci',
+                  'character set utf8 collate utf8_unicode_ci',
+                  'character set binary collate binary',
+                  'character set ascii collate ascii_bin',
+                  'character set latin1 collate latin1_bin'
+                 },
+    c_str_len = {range = util.range(1, 40)},
     }
 
     T.c_int.rand = function() return T.c_int.seq:rand() end
@@ -29,7 +29,7 @@
     T.c_timestamp.rand = function() return T.c_timestamp.range:randt() end
     T.c_double.rand = function() return T.c_double.range:randf() end
     T.c_decimal.rand = function() return T.c_decimal.range:randf() end
-	
+    
     T.rand_collation = function() return util.choice(T.collations) end
     T.c_str_len.rand = function() return T.c_str_len.range:randi() end
 
@@ -44,7 +44,7 @@ create_table:
         c_int int,
         c_str varchar(40) rand_collation,
         v_str varchar(40) as (sub_str) virtual,
-        s_str varchar(40) as (sub_str) stored,			
+        s_str varchar(40) as (sub_str) stored,            
         c_datetime datetime,
         c_timestamp timestamp,
         c_double double,
@@ -56,12 +56,12 @@ create_table:
         key_c_datetime
         key_c_timestamp
     )
-	
+    
 create_view:
-	create view v as select * from t
-	
+    create view v as select * from t
+    
 sub_str:
-	SUBSTR(c_str, 1, generated_len)
+    SUBSTR(c_str, 1, generated_len)
 
 key_primary:
  |  , primary key(c_int)
@@ -71,12 +71,13 @@ key_primary:
  |  , primary key(c_int, c_str(prefix_idx_len))
  
 prefix_idx_len: { print(T.c_str_len.rand()) }
+
 generated_len: { print(T.c_str_len.rand()) }
 
 rand_collation: { print(T.rand_collation()) }
 
 
-key_c_int:					   
+key_c_int:                       
  |  , key(c_int)
  |  , unique key(c_int)
 
@@ -190,7 +191,7 @@ common_delete:
     delete from t where c_int = rand_c_int
  |  delete from t where c_int in ({ local k = T.c_int.seq:head(); print(k-2) }, rand_c_int) or c_str in (rand_c_str, rand_c_str, rand_c_str, rand_c_str) maybe_write_limit
  |  delete from t where c_str is null
- |	delete from t where v_str is null
- |	delete from t where s_str is null
+ |  delete from t where v_str is null
+ |  delete from t where s_str is null
  |  delete from t where c_decimal > c_double/2 maybe_write_limit
  |  [weight=0.8] delete from t where c_timestamp is null or c_double is null maybe_write_limit

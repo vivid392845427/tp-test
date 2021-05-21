@@ -12,6 +12,17 @@
 
         cols = {'c_int', 'c_int', 'c_int', 'c_str', 'c_str', 'c_datetime', 'c_timestamp', 'c_double', 'c_decimal'},
         hints = {'MERGE_JOIN', 'INL_JOIN', 'INL_HASH_JOIN', 'INL_MERGE_JOIN', 'HASH_JOIN'},
+        collations = {'character set utf8mb4 collate utf8mb4_general_ci',
+                      'character set utf8mb4 collate utf8mb4_unicode_ci',
+                      'character set utf8mb4 collate utf8mb4_bin',
+                      'character set utf8 collate utf8_bin',
+                      'character set utf8 collate utf8_general_ci',
+                      'character set utf8 collate utf8_unicode_ci',
+                      'character set binary collate binary',
+                      'character set ascii collate ascii_bin',
+                      'character set latin1 collate latin1_bin'
+                 },
+        c_str_len = {range = util.range(1, 40)},
 
         current_col = 'c_int',
         current_table = 1,
@@ -33,6 +44,9 @@
     T.c_decimal.rand = function() return T.c_decimal.range:randf() end
     T.rand_col = function() return util.choice(T.cols) end
     T.rand_hint = function() return util.choice(T.hints) end
+    T.rand_character_set = function() return util.choice(T.collations) end
+    character = T.rand_character_set()
+    T.c_str_len.rand = function() return T.c_str_len.range:randi() end
 
     T.mark_id = function(col) T.count_ids[col][T.current_table] = T.count_ids[col][T.current_table] + 1 end
     T.mark_dup = function()
@@ -50,6 +64,7 @@
         return ps
     end
     T.both_parted = function() return T.count_parted + T.count_create_like == 2 end
+
 }
 
 init: create_table; insert_data
@@ -66,11 +81,15 @@ key_primary:
  |  , primary key(c_int) { T.mark_id('c_int') }
  |  , primary key(c_str) { T.mark_id('c_str') }
  |  , primary key(c_int, c_str) { T.mark_id('c_int_str') }
+ |  , primary key(c_str(prefix_idx_len)) { T.mark_id('c_str') }
+ |  , primary key(c_int, c_str(prefix_idx_len)) { T.mark_id('c_int_str') }
 
 key_c_int_part: | , key(c_int)
 key_c_int: [weight=2] key_c_int_part | , unique key(c_int) { T.mark_id('c_int') }
 key_c_str_part: | , key(c_str)
 key_c_str: [weight=2] key_c_str_part | , unique key(c_str) { T.mark_id('c_str') }
+key_c_str_part: | , key(c_str(prefix_idx_len))
+key_c_str: [weight=2] key_c_str_part | , unique key(c_str(prefix_idx_len)) { T.mark_id('c_str') }
 key_c_decimal_part: | , key(c_decimal)
 key_c_decimal: [weight=2] key_c_decimal_part | , unique key(c_decimal) { T.mark_id('c_decimal') }
 key_c_datetime_part: | , key(c_datetime)
@@ -83,13 +102,17 @@ table_defs:
  |  (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) parted_by_int { T.count_parted = T.count_parted + 1 }
  |  (table_cols, primary key ({ print(util.choice({'c_datetime', 'c_int, c_datetime'})) }) table_part_keys) parted_by_time { T.count_parted = T.count_parted + 1 }
 
+character_set: | { print(character) }
+
 table_cols:
     c_int int,
-    c_str varchar(40),
+    c_str varchar(40) character_set,
     c_datetime datetime,
     c_timestamp timestamp,
     c_double double,
     c_decimal decimal(12, 6)
+
+prefix_idx_len: { print(T.c_str_len.rand()) }
 
 table_full_keys:
     key_primary
@@ -146,7 +169,7 @@ rand_c_timestamp: { printf("'%s'", T.c_timestamp.rand()) }
 rand_c_double: { printf("%.6f", T.c_double.rand()) }
 rand_c_decimal: { printf("%.3f", T.c_decimal.rand()) }
 
-union_or_union_all: union | union all
+union_or_union_all: union | union all | union distinct
 insert_or_replace: insert | replace
 null_or_not: is null | is not null
 all_or_any_or_some: all | any | some
@@ -212,9 +235,9 @@ select_simple_subquery:
  |  select * from t1 where { T.current_col = T.rand_col(); print(T.current_col) } rand_cmp all_or_any_or_some (subquery_for_t1)
 
 select_apply_point_get:
-    select (select t2.{ c = T.rand_col(); print(c) } from t2 where predicates order by t2.{ print(c) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
- |  select (select t2.{ c = T.rand_col(); print(c) } from t2 where t2.{ print(c) } rand_cmp t1.{ print(c) } and t2.c_int = rand_c_int order by t2.{ print(c) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
- |  select (select t2.{ c = T.rand_col(); print(c) } from t2 where t2.{ print(c) } rand_cmp t1.{ print(c) } and t2.c_int in (rand_c_int, rand_c_int, rand_c_int) order by t2.{ print(c) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
+    select (select t2.{ cc = T.rand_col(); print(cc) } from t2 where predicates order by t2.{ print(cc) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
+ |  select (select t2.{ cc = T.rand_col(); print(cc) } from t2 where t2.{ print(cc) } rand_cmp t1.{ print(cc) } and t2.c_int = rand_c_int order by t2.{ print(cc) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
+ |  select (select t2.{ cc = T.rand_col(); print(cc) } from t2 where t2.{ print(cc) } rand_cmp t1.{ print(cc) } and t2.c_int in (rand_c_int, rand_c_int, rand_c_int) order by t2.{ print(cc) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
 
 subquery_for_t1:
     select_from_t2_only
