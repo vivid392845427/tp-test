@@ -9,6 +9,18 @@
         c_timestamp = { range = util.range(1577836800, 1593561599) },
         c_double = { range = util.range(100) },
         c_decimal = { range = util.range(10) },
+		
+	collations = {'character set utf8mb4 collate utf8mb4_general_ci',
+		      'character set utf8mb4 collate utf8mb4_unicode_ci',
+		      'character set utf8mb4 collate utf8mb4_bin',
+		      'character set utf8 collate utf8_bin',
+		      'character set utf8 collate utf8_general_ci',
+		      'character set utf8 collate utf8_unicode_ci',
+                      'character set binary collate binary',
+                      'character set ascii collate ascii_bin',
+		      'character set latin1 collate latin1_bin'
+		     },
+	 c_str_len = {range = util.range(1, 40)},
     }
 
     T.c_int.rand = function() return T.c_int.seq:rand() end
@@ -17,17 +29,22 @@
     T.c_timestamp.rand = function() return T.c_timestamp.range:randt() end
     T.c_double.rand = function() return T.c_double.range:randf() end
     T.c_decimal.rand = function() return T.c_decimal.range:randf() end
+	
+    T.rand_collation = function() return util.choice(T.collations) end
+    T.c_str_len.rand = function() return T.c_str_len.range:randi() end
 
 }
 
-init: create_table; insert_data
+init: create_table; create_view; insert_data
 
 txn: rand_queries
 
 create_table:
     create table t (
         c_int int,
-        c_str varchar(40),
+        c_str varchar(40) rand_collation,
+	v_str varchar(40) as (sub_str) virtual,
+	s_str varchar(40) as (sub_str) stored,			
         c_datetime datetime,
         c_timestamp timestamp,
         c_double double,
@@ -39,19 +56,35 @@ create_table:
         key_c_datetime
         key_c_timestamp
     )
+	
+create_view:
+	create view v as select * from t
+	
+sub_str:
+	SUBSTR(c_str, 1, generated_len)
 
 key_primary:
  |  , primary key(c_int)
  |  , primary key(c_str)
  |  , primary key(c_int, c_str)
+ |  , primary key(c_str(prefix_idx_len))
+ |  , primary key(c_int, c_str(prefix_idx_len))
+ 
+prefix_idx_len: { print(T.c_str_len.rand()) }
+generated_len: { print(T.c_str_len.rand()) }
 
-key_c_int:
+rand_collation: { print(T.rand_collation()) }
+
+
+key_c_int:					   
  |  , key(c_int)
  |  , unique key(c_int)
 
 key_c_str:
  |  , key(c_str)
  |  , unique key(c_str)
+ |  , key(c_str(prefix_idx_len))
+ |  , unique key(c_str(prefix_idx_len))
 
 key_c_decimal:
  |  , key(c_decimal)
@@ -63,12 +96,20 @@ key_c_datetime:
 
 key_c_timestamp:
  |  , key(c_timestamp)
+ |  , unique key(c_timestamp) 
+ 
+key_generated_column:
+ |  , key(v_str)
+ |  , unique key(v_str)
+ |  , key(s_str)
+ |  , unique key(s_str)
 
+col_list: c_int, c_str, c_datetime, c_timestamp, c_double, c_decimal
 
 insert_data:
-    insert into t values next_row, next_row, next_row, next_row, next_row;
-    insert into t values next_row, next_row, next_row, next_row, next_row;
-    insert into t values next_row, next_row, next_row, next_row, next_row;
+    insert into t(col_list) values next_row, next_row, next_row, next_row, next_row;
+    insert into t(col_list) values next_row, next_row, next_row, next_row, next_row;
+    insert into t(col_list) values next_row, next_row, next_row, next_row, next_row;
 
 next_row: (next_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
 rand_row: (rand_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
@@ -104,19 +145,29 @@ rand_query:
 maybe_for_update: | for update
 maybe_write_limit: | [weight=2] order by c_int, c_str, c_double, c_decimal limit { print(math.random(3)) }
 
-col_list: c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp
-
 common_select:
     select col_list from t where c_int = rand_c_int
  |  select col_list from t where c_int in (rand_c_int, rand_c_int, rand_c_int)
  |  select col_list from t where c_int between { k = T.c_int.rand(); print(k) } and { print(k+3) }
  |  select col_list from t where c_str = rand_c_str
+ |  select col_list from t where v_str = sub_str
+ |  select col_list from t where s_str = sub_str
  |  select col_list from t where c_decimal < { local r = T.c_decimal.range; print((r.max-r.min)/2+r.min) }
  |  select col_list from t where c_datetime > rand_c_datetime
+ |  select col_list from v where c_int = rand_c_int
+ |  select col_list from v where c_int in (rand_c_int, rand_c_int, rand_c_int)
+ |  select col_list from v where c_int between { k = T.c_int.rand(); print(k) } and { print(k+3) }
+ |  select col_list from v where c_str = rand_c_str
+ |  select col_list from v where v_str = sub_str
+ |  select col_list from v where s_str = sub_str
+ |  select col_list from v where c_decimal < { local r = T.c_decimal.range; print((r.max-r.min)/2+r.min) }
+ |  select col_list from v where c_datetime > rand_c_datetime
 
 agg_select:
     select count(*) from t where c_timestamp between { t = T.c_timestamp.rand(); printf("'%s'", t) } and date_add({ printf("'%s'", t) }, interval 15 day)
  |  select sum(c_int) from t where c_datetime between { t = T.c_datetime.rand(); printf("'%s'", t) } and date_add({ printf("'%s'", t) }, interval 15 day)
+ |  select count(*) from v where c_timestamp between { t = T.c_timestamp.rand(); printf("'%s'", t) } and date_add({ printf("'%s'", t) }, interval 15 day)
+ |  select sum(c_int) from v where c_datetime between { t = T.c_datetime.rand(); printf("'%s'", t) } and date_add({ printf("'%s'", t) }, interval 15 day)
 
 common_update:
     update t set c_str = rand_c_str where c_int = rand_c_int
@@ -128,16 +179,18 @@ common_update:
  |  [weight=0.4] update t set c_datetime = rand_c_datetime, c_timestamp = rand_c_timestamp, c_double = rand_c_double, c_decimal = rand_c_decimal where c_decimal is null maybe_write_limit
 
 common_insert:
-    insert into t values next_row
- |  [weight=0.5] insert_or_replace into t values next_row, next_row, ({ print(T.c_int.seq:head()-1) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
+    insert into t(col_list) values next_row
+ |  [weight=0.5] insert_or_replace into t(col_list) values next_row, next_row, ({ print(T.c_int.seq:head()-1) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
  |  insert_or_replace into t (c_int, c_str, c_datetime, c_double) values (rand_c_int, rand_c_str, rand_c_datetime, rand_c_double)
  |  insert_or_replace into t (c_int, c_str, c_timestamp, c_decimal) values (next_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal), (rand_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal)
- |  insert into t values rand_row, rand_row, next_row on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp)
- |  insert into t values rand_row, rand_row, next_row on duplicate key update c_int = c_int + 1, c_str = concat(c_int, ':', c_str)
+ |  insert into t(col_list) values rand_row, rand_row, next_row on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp)
+ |  insert into t(col_list) values rand_row, rand_row, next_row on duplicate key update c_int = c_int + 1, c_str = concat(c_int, ':', c_str)
 
 common_delete:
     delete from t where c_int = rand_c_int
  |  delete from t where c_int in ({ local k = T.c_int.seq:head(); print(k-2) }, rand_c_int) or c_str in (rand_c_str, rand_c_str, rand_c_str, rand_c_str) maybe_write_limit
  |  delete from t where c_str is null
+ |	delete from t where v_str is null
+ |	delete from t where s_str is null
  |  delete from t where c_decimal > c_double/2 maybe_write_limit
  |  [weight=0.8] delete from t where c_timestamp is null or c_double is null maybe_write_limit
