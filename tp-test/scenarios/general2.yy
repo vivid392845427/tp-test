@@ -9,6 +9,17 @@
         c_timestamp = { range = util.range(1577836800, 1593561599) },
         c_double = { range = util.range(100) },
         c_decimal = { range = util.range(10) },
+        collations = {'character set utf8mb4 collate utf8mb4_general_ci',
+                      'character set utf8mb4 collate utf8mb4_unicode_ci',
+                      'character set utf8mb4 collate utf8mb4_bin',
+                      'character set utf8 collate utf8_bin',
+                      'character set utf8 collate utf8_general_ci',
+                      'character set utf8 collate utf8_unicode_ci',
+                      'character set binary collate binary',
+                      'character set ascii collate ascii_bin',
+                      'character set latin1 collate latin1_bin'
+                     },
+        c_str_len = {range = util.range(1, 40)},
     }
 
     G.c_int.rand = function() return G.c_int.seq:rand() end
@@ -17,6 +28,8 @@
     G.c_timestamp.rand = function() return util.quota(G.c_timestamp.range:randt()) end
     G.c_double.rand = function() return sprintf('%.6f', G.c_double.range:randf()) end
     G.c_decimal.rand = function() return sprintf('%.3f', G.c_decimal.range:randf()) end
+    G.rand_collation = function() return util.choice(G.collations) end
+    G.c_str_len.rand = function() return G.c_str_len.range:randi() end
 
     T = {
         cols = {},
@@ -53,7 +66,7 @@ txn: rand_queries
 create_table:
     create table t (
         c_int int,
-        c_str varchar(40),
+        c_str varchar(40) rand_collation,
         c_datetime datetime,
         c_timestamp timestamp,
         c_double double,
@@ -69,8 +82,15 @@ create_table:
 key_primary:
  |  , primary key(c_int)
  |  , primary key(c_str)
+ |  , primary key(c_str(prefix_idx_len))
  |  , primary key(c_int, c_str)
  |  , primary key(c_str, c_int)
+ |  , primary key(c_int, c_str(prefix_idx_len))
+ |  , primary key(c_str(prefix_idx_len), c_int)
+ 
+prefix_idx_len: { print(G.c_str_len.rand()) }
+
+rand_collation: { print(G.rand_collation()) }
 
 key_c_int:
  |  , key(c_int)
@@ -79,6 +99,8 @@ key_c_int:
 key_c_str:
  |  , key(c_str)
  |  , unique key(c_str)
+ |  , key(c_str(prefix_idx_len))
+ |  , unique key(c_str(prefix_idx_len))
 
 key_c_decimal:
  |  , key(c_decimal)
@@ -136,7 +158,7 @@ union_or_union_all: union | union all
 insert_or_replace: insert | replace
 
 maybe_for_update: | for update
-maybe_write_limit: | [weight=2] order by c_int, c_str, c_decimal, c_double limit { print(math.random(3)) }
+maybe_write_limit: order by c_int, c_str, c_decimal, c_double | [weight=2] order by c_int, c_str, c_decimal, c_double limit { print(math.random(3)) }
 
 selected_cols: c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp
 
