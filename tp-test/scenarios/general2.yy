@@ -20,6 +20,7 @@
                       'character set latin1 collate latin1_bin'
                      },
         c_str_len = {range = util.range(1, 40)},
+        enums_set = {'blue', 'green', 'red', 'yellow', 'white', 'orange', 'purple'},
     }
 
     G.c_int.rand = function() return G.c_int.seq:rand() end
@@ -30,6 +31,17 @@
     G.c_decimal.rand = function() return sprintf('%.3f', G.c_decimal.range:randf()) end
     G.rand_collation = function() return util.choice(G.collations) end
     G.c_str_len.rand = function() return G.c_str_len.range:randi() end
+
+    G.get_enum_values = function() local enum_values = "" for k,v in ipairs(G.enums_set) do
+                                         if (k==7) then
+                                             enum_values=enum_values.."'"..v.."'"
+                                         else
+                                             enum_values=enum_values.."'"..v.."',"
+                                         end
+                                    end
+                                    return enum_values
+                        end
+    G.rand_c_enum = function() return util.quota(util.choice(G.enums_set)) end
 
     T = {
         cols = {},
@@ -42,6 +54,8 @@
     T.cols[#T.cols+1] = util.col('c_timestamp', G.c_timestamp.rand)
     T.cols[#T.cols+1] = util.col('c_double', G.c_double.rand)
     T.cols[#T.cols+1] = util.col('c_decimal', G.c_decimal.rand)
+    T.cols[#T.cols+1] = util.col('c_enum', G.rand_c_enum)
+    T.cols[#T.cols+1] = util.col('c_set', G.rand_c_enum)
 
     T.col_int_str = util.col('(c_int, c_str)', function() return sprintf("(%d, %s)", G.c_int.rand(), G.c_str.rand()) end)
 
@@ -70,13 +84,17 @@ create_table:
         c_datetime datetime,
         c_timestamp timestamp,
         c_double double,
-        c_decimal decimal(12, 6)
+        c_decimal decimal(12, 6),
+        c_enum enum(enums_values),
+        c_set set (enums_values)
         key_primary
         key_c_int
         key_c_str
         key_c_decimal
         key_c_datetime
         key_c_timestamp
+        key_c_enum
+        key_c_set
     )
 
 key_primary:
@@ -87,10 +105,14 @@ key_primary:
  |  , primary key(c_str, c_int)
  |  , primary key(c_int, c_str(prefix_idx_len))
  |  , primary key(c_str(prefix_idx_len), c_int)
+ |  , primary key(c_int, c_enum)
+ |  , primary key(c_int, c_set)
  
 prefix_idx_len: { print(G.c_str_len.rand()) }
 
 rand_collation: { print(G.rand_collation()) }
+
+enums_values: {print(G.get_enum_values())}
 
 key_c_int:
  |  , key(c_int)
@@ -113,18 +135,26 @@ key_c_datetime:
 key_c_timestamp:
  |  , key(c_timestamp)
  |  [weight=0.2] , unique key(c_timestamp)
+ 
+key_c_enum:
+ |  , key(c_enum)
+ 
+key_c_set:
+ |  , key(c_set)
 
 
 insert_data:
     insert into t values next_row, next_row, next_row, next_row, next_row;
     insert into t values next_row, next_row, next_row, next_row, next_row
 
-next_row: (next_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
-rand_row: (rand_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
+next_row: (next_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum, rand_c_set)
+rand_row: (rand_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum, rand_c_set)
 
 next_c_int: { print(G.c_int.seq:next()) }
 rand_c_int: { T.get_col('c_int'):pval() }
 rand_c_str: { T.get_col('c_str'):pval() }
+rand_c_enum: {T.get_col('c_enum'):pval() }
+rand_c_set: {T.get_col('c_set'):pval() }
 rand_c_datetime: { T.get_col('c_datetime'):pval() }
 rand_c_timestamp: { T.get_col('c_timestamp'):pval() }
 rand_c_double: { T.get_col('c_double'):pval() }
@@ -160,7 +190,7 @@ insert_or_replace: insert | replace
 maybe_for_update: | for update
 maybe_write_limit: order by c_int, c_str, c_decimal, c_double | [weight=2] order by c_int, c_str, c_decimal, c_double limit { print(math.random(3)) }
 
-selected_cols: c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp
+selected_cols: c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp, c_enum, c_set
 
 predicates: [weight=2] predicate | predicate rand_logic predicates
 
@@ -196,7 +226,7 @@ rows_to_ins: [weight=4] row_to_ins | row_to_ins, rows_to_ins
 row_to_ins:
     next_row
  |  [weight=0.4] rand_row
- |  [weight=0.4] ({ print(G.c_int.seq:head()-math.random(3)) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
+ |  [weight=0.4] ({ print(G.c_int.seq:head()-math.random(3)) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum, rand_c_set)
 
 on_dup_assignments: [weight=3] on_dup_assignment | on_dup_assignment, on_dup_assignments
 
@@ -206,11 +236,11 @@ on_dup_assignment:
 
 common_insert:
     insert_or_replace into t values rows_to_ins
- |  insert_or_replace into t (c_int, c_str, c_datetime, c_double) values (rand_c_int, rand_c_str, rand_c_datetime, rand_c_double)
- |  insert_or_replace into t (c_int, c_str, c_timestamp, c_decimal) values (next_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal), (rand_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal)
+ |  insert_or_replace into t (c_int, c_str, c_datetime, c_double, c_enum, c_set) values (rand_c_int, rand_c_str, rand_c_datetime, rand_c_double, rand_c_enum, rand_c_set)
+ |  insert_or_replace into t (c_int, c_str, c_timestamp, c_decimal, c_enum, c_set) values (next_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal, rand_c_enum, rand_c_set), (rand_c_int, rand_c_str, rand_c_timestamp, rand_c_decimal, rand_c_enum, rand_c_set)
  |  insert into t values rows_to_ins on duplicate key update on_dup_assignments
 
 common_delete:
     [weight=3] delete from t where predicates maybe_write_limit
  |  delete from t where c_int in ({ local k = G.c_int.seq:head(); print(k-math.random(3)) }, rand_c_int) maybe_write_limit
- |  delete from t where { print(util.choice({'c_int', 'c_str', 'c_decimal', 'c_double', 'c_datetime', 'c_timestamp'})) } is null maybe_write_limit
+ |  delete from t where { print(util.choice({'c_int', 'c_str', 'c_decimal', 'c_double', 'c_datetime', 'c_timestamp', 'c_enum', 'c_set'})) } is null maybe_write_limit
