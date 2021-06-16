@@ -23,7 +23,7 @@
                       'character set latin1 collate latin1_bin'
                  },
         c_str_len = {range = util.range(1, 40)},
-		enums_set = {'blue', 'green', 'red', 'yellow', 'white', 'orange', 'purple'},
+        enums_set = {'blue', 'green', 'red', 'yellow', 'white', 'orange', 'purple'},
 
         current_col = 'c_int',
         current_table = 1,
@@ -31,7 +31,7 @@
             c_int = {0, 0},
             c_str = {0, 0},
             c_int_str = {0, 0},
-			c_int_enum = {0, 0},
+            c_int_enum = {0, 0},
             c_decimal = {0, 0},
         },
         count_parted = 0,
@@ -139,7 +139,7 @@ table_full_keys:
     key_c_decimal
     key_c_datetime
     key_c_timestamp
-	key_c_enum
+    key_c_enum
 
 table_part_keys:
     key_c_int_part
@@ -221,7 +221,7 @@ rand_logic: and | or
 rand_hint: | { printf("/*+ %s(t1,t2) */ ", T.rand_hint()) }
 rand_join: join | left join | right join
 
-maybe_for_update: | [weight=0] for update
+maybe_for_update: | [weight=0.4] for update
 maybe_write_limit: | [weight=2] order by c_int, c_str, c_double, c_decimal limit { print(math.random(3)) }
 
 predicates:
@@ -243,6 +243,7 @@ predicate2:
     { printf("t%d.c_int", math.random(2)) } = rand_c_int_t1
  |  { printf("t%d.c_int", math.random(2)) } in (rand_c_int_t1, rand_c_int_t2, rand_c_int_t1)
  |  { printf("t%d.c_str", math.random(2)) } = rand_c_str
+ |  { printf("t%d.c_str", math.random(2)) } in (rand_c_str, rand_c_str, rand_c_str)
  |  { printf("t%d.c_enum", math.random(2)) } = rand_c_enum
  |  { printf("t%d.c_enum", math.random(2)) } in (rand_c_enum, rand_c_enum, rand_c_enum)
  |  { printf("t%d.%s", math.random(2), T.rand_col()) } null_or_not
