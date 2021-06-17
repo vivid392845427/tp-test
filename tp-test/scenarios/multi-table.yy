@@ -80,9 +80,11 @@
 
 }
 
-init: create_table; insert_data
+init: set_session_attr; create_table; insert_data;
 
 txn: rand_queries
+
+set_session_attr: set @@session.tidb_enable_list_partition = ON
 
 create_table:
     create table t1 { T.current_table = 1 } table_defs;
@@ -116,6 +118,8 @@ table_defs:
     (table_cols table_full_keys)
  |  (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) parted_by_int { T.count_parted = T.count_parted + 1 }
  |  (table_cols, primary key ({ print(util.choice({'c_datetime', 'c_int, c_datetime'})) }) table_part_keys) parted_by_time { T.count_parted = T.count_parted + 1 }
+ |  (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) list_parted_by_int { T.count_parted = T.count_parted + 1 }
+ |  (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) list_coulumn_parted_by_int { T.count_parted = T.count_parted + 1 }
 
 character_set: | { print(character) }
 
@@ -162,7 +166,21 @@ parted_by_time:
     partition p1 values less than (to_days('2020-04-01')),
     partition p2 values less than (to_days('2020-06-01')),
     partition p3 values less than maxvalue)
-
+	
+list_parted_by_int:
+    partition by list (c_int) (
+    partition p0 values IN (1, 5, 9, 13, 17, 21, 25, 29, 33, 37),
+    partition p1 values IN (2, 6, 10, 14, 18, 22, 26, 30, 34, 38),
+    partition p2 values IN (3, 7, 11, 15, 19, 23, 27, 31, 35, 39),
+    partition p3 values IN (4, 8, 12, 16, 20, 24, 28, 32, 36, 40))
+	
+list_coulumn_parted_by_int:
+    partition by list columns(c_int) (
+    partition p0 values IN (1, 5, 9, 13, 17, 21, 25, 29, 33, 37),
+    partition p1 values IN (2, 6, 10, 14, 18, 22, 26, 30, 34, 38),
+    partition p2 values IN (3, 7, 11, 15, 19, 23, 27, 31, 35, 39),
+    partition p3 values IN (4, 8, 12, 16, 20, 24, 28, 32, 36, 40))
+    
 insert_data:
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
