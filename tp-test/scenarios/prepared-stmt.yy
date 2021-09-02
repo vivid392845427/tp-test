@@ -9,6 +9,17 @@
         c_timestamp = { range = util.range(1577836800, 1593561599) },
         c_double = { range = util.range(100) },
         c_decimal = { range = util.range(10) },
+        collations = {'character set utf8mb4 collate utf8mb4_general_ci',
+                      'character set utf8mb4 collate utf8mb4_unicode_ci',
+                      'character set utf8mb4 collate utf8mb4_bin',
+                      'character set utf8 collate utf8_bin',
+                      'character set utf8 collate utf8_general_ci',
+                      'character set utf8 collate utf8_unicode_ci',
+                      'character set binary collate binary',
+                      'character set ascii collate ascii_bin',
+                      'character set latin1 collate latin1_bin'
+                     },
+        c_str_len = {range = util.range(1, 40)},
     }
 
     G.c_int.rand = function() return G.c_int.seq:rand() end
@@ -17,6 +28,8 @@
     G.c_timestamp.rand = function() return util.quota(G.c_timestamp.range:randt()) end
     G.c_double.rand = function() return sprintf('%.6f', G.c_double.range:randf()) end
     G.c_decimal.rand = function() return sprintf('%.3f', G.c_decimal.range:randf()) end
+    G.rand_collation = function() return util.choice(G.collations) end
+    G.c_str_len.rand = function() return G.c_str_len.range:randi() end
 
     T = {
         cols = {},
@@ -53,7 +66,7 @@ txn: begin; rand_queries; commit
 create_table:
     create table t (
         c_int int,
-        c_str varchar(40),
+        c_str varchar(40) rand_collation,
         c_datetime datetime,
         c_timestamp timestamp,
         c_double double,
@@ -71,6 +84,13 @@ key_primary:
  |  , primary key(c_str)
  |  , primary key(c_int, c_str)
  |  , primary key(c_str, c_int)
+ |  , primary key(c_str(prefix_idx_len))
+ |  , primary key(c_int, c_str(prefix_idx_len))
+ |  , primary key(c_str(prefix_idx_len), c_int)
+ 
+prefix_idx_len: { print(G.c_str_len.rand()) }
+
+rand_collation: { print(G.rand_collation()) }
 
 key_c_int:
  |  , key(c_int)
@@ -79,6 +99,8 @@ key_c_int:
 key_c_str:
  |  , key(c_str)
  |  , unique key(c_str)
+ |  , key(c_str(prefix_idx_len))
+ |  , unique key(c_str(prefix_idx_len))
 
 key_c_decimal:
  |  , key(c_decimal)
@@ -114,14 +136,14 @@ prepare_stmts:
     prepare s1 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_int = ?';
     prepare s2 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_str = ?';
     prepare s3 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where (c_int, c_str) = (?, ?)';
-    prepare s4 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_int in (?, ?, ?)';
-    prepare s5 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_str in (?, ?, ?)';
-    prepare s6 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where (c_int, c_str) in ((?, ?), (?, ?), (?, ?))';
-    prepare s7 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_decimal < ?';
-    prepare s8 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_datetime between ? and ?';
+    prepare s4 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_int in (?, ?, ?) order by c_int, c_str';
+    prepare s5 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_str in (?, ?, ?) order by c_int, c_str';
+    prepare s6 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where (c_int, c_str) in ((?, ?), (?, ?), (?, ?)) order by c_int, c_str';
+    prepare s7 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_decimal < ? order by c_int, c_str';
+    prepare s8 from 'select c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp from t where c_datetime between ? and ? order by c_int, c_str';
     prepare s9 from 'select count(c_int) from t where c_int >= ? and c_int < ?';
     prepare u1 from 'update t set c_str = ? where c_int = ?';
-    prepare u2 from 'update t set c_decimal = c_decimal * ? where c_int in (?, ?, ?)';
+    prepare u2 from 'update t set c_decimal = c_decimal * ? where c_int in (?, ?, ?) order by c_int';
     prepare u3 from 'update t set c_int = c_int + ? where c_datetime between ? and ? order by c_int, c_str, c_decimal, c_double limit 2';
     prepare i1 from 'insert into t values (?, ?, ?, ?, ?, ?)';
     prepare i2 from 'insert into t values (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp)';
@@ -185,7 +207,7 @@ rand_queries:
 
 rand_query:
     [weight=0.3] common_select maybe_for_update
- |  [weight=0.2] (common_select maybe_for_update) union_or_union_all (common_select maybe_for_update)
+ |  [weight=0.2] (common_select maybe_for_update) union_or_union_all (common_select maybe_for_update) order_by
  |  [weight=0.3] agg_select maybe_for_update
  |  [weight=0.2] (agg_select maybe_for_update) union_or_union_all (agg_select maybe_for_update)
  |  [weight=0.5] common_insert
@@ -207,6 +229,7 @@ insert_or_replace: insert | replace
 
 maybe_for_update: | for update
 maybe_write_limit: | [weight=2] order by c_int, c_str, c_decimal, c_double limit { print(math.random(3)) }
+order_by: order by c_int, c_str, c_decimal, c_double
 
 selected_cols: c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp
 
@@ -222,8 +245,8 @@ predicate:
  |  { print(util.choice({'c_decimal', 'c_double', 'c_datetime', 'c_timestamp'})) } is_null_or_not
 
 common_select:
-    select selected_cols from t where predicate
- |  select selected_cols from t where predicates
+    select selected_cols from t where predicate order_by
+ |  select selected_cols from t where predicates order_by
 
 agg_select:
     select count(*) from t where predicates

@@ -10,8 +10,20 @@
         c_double = { range = util.range(100) },
         c_decimal = { range = util.range(10) },
 
-        cols = {'c_int', 'c_int', 'c_int', 'c_str', 'c_str', 'c_datetime', 'c_timestamp', 'c_double', 'c_decimal'},
+        cols = {'c_int', 'c_int', 'c_int', 'c_str', 'c_str', 'c_datetime', 'c_timestamp', 'c_double', 'c_decimal', 'c_enum'},
         hints = {'MERGE_JOIN', 'INL_JOIN', 'INL_HASH_JOIN', 'INL_MERGE_JOIN', 'HASH_JOIN'},
+        collations = {'character set utf8mb4 collate utf8mb4_general_ci',
+                      'character set utf8mb4 collate utf8mb4_unicode_ci',
+                      'character set utf8mb4 collate utf8mb4_bin',
+                      'character set utf8 collate utf8_bin',
+                      'character set utf8 collate utf8_general_ci',
+                      'character set utf8 collate utf8_unicode_ci',
+                      'character set binary collate binary',
+                      'character set ascii collate ascii_bin',
+                      'character set latin1 collate latin1_bin'
+                 },
+        c_str_len = {range = util.range(1, 40)},
+        enums_set = {'blue', 'green', 'red', 'yellow', 'white', 'orange', 'purple'},
 
         current_col = 'c_int',
         current_table = 1,
@@ -19,6 +31,7 @@
             c_int = {0, 0},
             c_str = {0, 0},
             c_int_str = {0, 0},
+            c_int_enum = {0, 0},
             c_decimal = {0, 0},
         },
         count_parted = 0,
@@ -33,6 +46,19 @@
     T.c_decimal.rand = function() return T.c_decimal.range:randf() end
     T.rand_col = function() return util.choice(T.cols) end
     T.rand_hint = function() return util.choice(T.hints) end
+    T.rand_character_set = function() return util.choice(T.collations) end
+    character = T.rand_character_set()
+    T.c_str_len.rand = function() return T.c_str_len.range:randi() end
+    T.get_enum_values = function() local enum_values = "" for k,v in ipairs(T.enums_set) do
+                                         if (k==7) then
+                                             enum_values=enum_values.."'"..v.."'"
+                                         else
+                                             enum_values=enum_values.."'"..v.."',"
+                                         end
+                                    end
+                                    return enum_values
+                        end
+    T.rand_c_enum = function() return util.choice(T.enums_set) end
 
     T.mark_id = function(col) T.count_ids[col][T.current_table] = T.count_ids[col][T.current_table] + 1 end
     T.mark_dup = function()
@@ -45,16 +71,20 @@
         if T.count_ids.c_int[1] > 0 and T.count_ids.c_int[2] > 0 then table.insert(ps, 't1.c_int = t2.c_int') end
         if T.count_ids.c_str[1] > 0 and T.count_ids.c_str[2] > 0 then table.insert(ps, 't1.c_str = t2.c_str') end
         if T.count_ids.c_int_str[1] > 0 and T.count_ids.c_int_str[2] > 0 then table.insert(ps, 't1.c_int = t2.c_int and t1.c_str = t2.c_str') end
+        if T.count_ids.c_int_enum[1] > 0 and T.count_ids.c_int_enum[2] > 0 then table.insert(ps, 't1.c_int = t2.c_int and t1.c_enum = t2.c_enum') end
         if T.count_ids.c_decimal[1] > 0 and T.count_ids.c_decimal[2] > 0 then table.insert(ps, 't1.c_decimal = t2.c_decimal') end
         if #ps == 0 then table.insert(ps, '1 = 0') end
         return ps
     end
     T.both_parted = function() return T.count_parted + T.count_create_like == 2 end
+
 }
 
-init: create_table; insert_data
+init: set_session_attr; create_table; insert_data;
 
 txn: begin; rand_queries; commit
+
+set_session_attr: set @@session.tidb_enable_list_partition = ON
 
 create_table:
     create table t1 { T.current_table = 1 } table_defs;
@@ -66,11 +96,17 @@ key_primary:
  |  , primary key(c_int) { T.mark_id('c_int') }
  |  , primary key(c_str) { T.mark_id('c_str') }
  |  , primary key(c_int, c_str) { T.mark_id('c_int_str') }
+ |  , primary key(c_str(prefix_idx_len)) { T.mark_id('c_str') }
+ |  , primary key(c_int, c_str(prefix_idx_len)) { T.mark_id('c_int_str') }
+ |  , primary key(c_int, c_enum) { T.mark_id('c_int_enum') }
 
 key_c_int_part: | , key(c_int)
 key_c_int: [weight=2] key_c_int_part | , unique key(c_int) { T.mark_id('c_int') }
 key_c_str_part: | , key(c_str)
+key_c_enum: | ,key(c_enum)
 key_c_str: [weight=2] key_c_str_part | , unique key(c_str) { T.mark_id('c_str') }
+key_c_str_part: | , key(c_str(prefix_idx_len))
+key_c_str: [weight=2] key_c_str_part | , unique key(c_str(prefix_idx_len)) { T.mark_id('c_str') }
 key_c_decimal_part: | , key(c_decimal)
 key_c_decimal: [weight=2] key_c_decimal_part | , unique key(c_decimal) { T.mark_id('c_decimal') }
 key_c_datetime_part: | , key(c_datetime)
@@ -80,16 +116,25 @@ key_c_timestamp: [weight=2] key_c_timestamp_part | , unique key(c_timestamp)
 
 table_defs:
     (table_cols table_full_keys)
- |  [omit] (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) parted_by_int { T.count_parted = T.count_parted + 1 }
- |  [omit] (table_cols, primary key ({ print(util.choice({'c_datetime', 'c_int, c_datetime'})) }) table_part_keys) parted_by_time { T.count_parted = T.count_parted + 1 }
+ |  (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) parted_by_int { T.count_parted = T.count_parted + 1 }
+ |  (table_cols, primary key ({ print(util.choice({'c_datetime', 'c_int, c_datetime'})) }) table_part_keys) parted_by_time { T.count_parted = T.count_parted + 1 }
+ |  (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) list_parted_by_int { T.count_parted = T.count_parted + 1 }
+ |  (table_cols, primary key ({ local k, t1, t2 = math.random(2), {'c_int', 'c_int_str'}, {'c_int', 'c_int, c_str'}; T.mark_id(t1[k]); print(t2[k]) }) table_part_keys) list_coulumn_parted_by_int { T.count_parted = T.count_parted + 1 }
+
+character_set: | { print(character) }
 
 table_cols:
     c_int int,
-    c_str varchar(40),
+    c_str varchar(40) character_set,
     c_datetime datetime,
     c_timestamp timestamp,
     c_double double,
-    c_decimal decimal(12, 6)
+    c_decimal decimal(12, 6),
+    c_enum enum(enums_values)
+
+prefix_idx_len: { print(T.c_str_len.rand()) }
+
+enums_values: {print(T.get_enum_values())}
 
 table_full_keys:
     key_primary
@@ -98,6 +143,7 @@ table_full_keys:
     key_c_decimal
     key_c_datetime
     key_c_timestamp
+    key_c_enum
 
 table_part_keys:
     key_c_int_part
@@ -121,6 +167,20 @@ parted_by_time:
     partition p2 values less than (to_days('2020-06-01')),
     partition p3 values less than maxvalue)
 
+list_parted_by_int:
+    partition by list (c_int) (
+    partition p0 values IN (1, 5, 9, 13, 17, 21, 25, 29, 33, 37),
+    partition p1 values IN (2, 6, 10, 14, 18, 22, 26, 30, 34, 38),
+    partition p2 values IN (3, 7, 11, 15, 19, 23, 27, 31, 35, 39),
+    partition p3 values IN (4, 8, 12, 16, 20, 24, 28, 32, 36, 40))
+
+list_coulumn_parted_by_int:
+    partition by list columns(c_int) (
+    partition p0 values IN (1, 5, 9, 13, 17, 21, 25, 29, 33, 37),
+    partition p1 values IN (2, 6, 10, 14, 18, 22, 26, 30, 34, 38),
+    partition p2 values IN (3, 7, 11, 15, 19, 23, 27, 31, 35, 39),
+    partition p3 values IN (4, 8, 12, 16, 20, 24, 28, 32, 36, 40))
+
 insert_data:
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
@@ -130,9 +190,9 @@ insert_data:
     insert into t2 values next_row_t2, next_row_t2, next_row_t2, next_row_t2, next_row_t2;
     insert into t2 values next_row_t2, next_row_t2, next_row_t2, next_row_t2, next_row_t2
 
-next_row_t1: (next_c_int_t1, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
-next_row_t2: (next_c_int_t2, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
-rand_row: (rand_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
+next_row_t1: (next_c_int_t1, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum)
+next_row_t2: (next_c_int_t2, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum)
+rand_row: (rand_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum)
 
 next_c_int_t1: { print(T.c_int.seq1:next()) }
 next_c_int_t2: { print(T.c_int.seq2:next()) }
@@ -145,8 +205,9 @@ rand_c_datetime: { printf("'%s'", T.c_datetime.rand()) }
 rand_c_timestamp: { printf("'%s'", T.c_timestamp.rand()) }
 rand_c_double: { printf("%.6f", T.c_double.rand()) }
 rand_c_decimal: { printf("%.3f", T.c_decimal.rand()) }
+rand_c_enum: { printf("'%s'", T.rand_c_enum()) }
 
-union_or_union_all: union | union all
+union_or_union_all: union | union all | union distinct
 insert_or_replace: insert | replace
 null_or_not: is null | is not null
 all_or_any_or_some: all | any | some
@@ -193,12 +254,16 @@ predicate1:
  |  t1.c_int = t2.c_int
  |  t1.c_str rand_cmp t2.c_str
  |  t1.c_int = t2.c_int and t1.c_str rand_cmp t2.c_str
+ |  t1.c_enum rand_cmp t2.c_enum
+ |  t1.c_int = t2.c_int and t1.c_enum rand_cmp t2.c_enum
 
 predicate2:
     { printf("t%d.c_int", math.random(2)) } = rand_c_int_t1
  |  { printf("t%d.c_int", math.random(2)) } in (rand_c_int_t1, rand_c_int_t2, rand_c_int_t1)
  |  { printf("t%d.c_str", math.random(2)) } = rand_c_str
  |  { printf("t%d.c_str", math.random(2)) } in (rand_c_str, rand_c_str, rand_c_str)
+ |  { printf("t%d.c_enum", math.random(2)) } = rand_c_enum
+ |  { printf("t%d.c_enum", math.random(2)) } in (rand_c_enum, rand_c_enum, rand_c_enum)
  |  { printf("t%d.%s", math.random(2), T.rand_col()) } null_or_not
 
 
@@ -212,9 +277,9 @@ select_simple_subquery:
  |  select * from t1 where { T.current_col = T.rand_col(); print(T.current_col) } rand_cmp all_or_any_or_some (subquery_for_t1)
 
 select_apply_point_get:
-    select (select t2.{ c = T.rand_col(); print(c) } from t2 where predicates order by t2.{ print(c) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
- |  select (select t2.{ c = T.rand_col(); print(c) } from t2 where t2.{ print(c) } rand_cmp t1.{ print(c) } and t2.c_int = rand_c_int order by t2.{ print(c) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
- |  select (select t2.{ c = T.rand_col(); print(c) } from t2 where t2.{ print(c) } rand_cmp t1.{ print(c) } and t2.c_int in (rand_c_int, rand_c_int, rand_c_int) order by t2.{ print(c) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
+    select (select t2.{ cc = T.rand_col(); print(cc) } from t2 where predicates order by t2.{ print(cc) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
+ |  select (select t2.{ cc = T.rand_col(); print(cc) } from t2 where t2.{ print(cc) } rand_cmp t1.{ print(cc) } and t2.c_int = rand_c_int order by t2.{ print(cc) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
+ |  select (select t2.{ cc = T.rand_col(); print(cc) } from t2 where t2.{ print(cc) } rand_cmp t1.{ print(cc) } and t2.c_int in (rand_c_int, rand_c_int, rand_c_int) order by t2.{ print(cc) } limit 1 maybe_for_update) x from t1 { print("/* force-unordered */") }
 
 subquery_for_t1:
     select_from_t2_only
@@ -225,6 +290,7 @@ select_from_t2_only:
  |  select { print(T.current_col) } from t2 where c_int in (rand_c_int, rand_c_int, rand_c_int)
  |  select { print(T.current_col) } from t2 where c_int between { k = T.c_int.seq2:rand(); print(k) } and { print(k+3) }
  |  select { print(T.current_col) } from t2 where c_str = rand_c_str
+ |  select { print(T.current_col) } from t2 where c_enum = rand_c_enum
  |  select { print(T.current_col) } from t2 where c_decimal < { local r = T.c_decimal.range; print((r.max-r.min)/2+r.min) }
  |  select { print(T.current_col) } from t2 where c_datetime > rand_c_datetime
 
@@ -239,6 +305,7 @@ rand_assignment:
     { local c = T.rand_col(); printf("t1.%s = t2.%s", c, c) }
  |  { printf("t%d.c_int", math.random(2)) } = rand_c_int
  |  { printf("t%d.c_str", math.random(2)) } = rand_c_str
+ |  { printf("t%d.c_enum", math.random(2)) } = rand_c_enum
  |  { printf("t%d.c_decimal", math.random(2)) } = rand_c_decimal
  |  { printf("t%d.c_timestamp", math.random(2)) } = rand_c_timestamp
 
@@ -253,25 +320,27 @@ delete_multi_tables:
 
 common_insert_t1:
     insert into t1 values next_row_t1
- |  [weight=0.5] insert_or_replace into t1 values next_row_t1, next_row_t1, ({ print(T.c_int.seq1:head()-1) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
- |  insert_or_replace into t1 (c_int, c_str, c_datetime, c_double) values (rand_c_int_t1, rand_c_str, rand_c_datetime, rand_c_double)
- |  insert_or_replace into t1 (c_int, c_str, c_timestamp, c_decimal) values (next_c_int_t1, rand_c_str, rand_c_timestamp, rand_c_decimal), (rand_c_int_t1, rand_c_str, rand_c_timestamp, rand_c_decimal)
- |  insert into t1 values rand_row, rand_row, next_row_t1 on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp)
+ |  [weight=0.5] insert_or_replace into t1 values next_row_t1, next_row_t1, ({ print(T.c_int.seq1:head()-1) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum)
+ |  insert_or_replace into t1 (c_int, c_str, c_datetime, c_double, c_enum) values (rand_c_int_t1, rand_c_str, rand_c_datetime, rand_c_double, rand_c_enum)
+ |  insert_or_replace into t1 (c_int, c_str, c_timestamp, c_decimal, c_enum) values (next_c_int_t1, rand_c_str, rand_c_timestamp, rand_c_decimal, rand_c_enum), (rand_c_int_t1, rand_c_str, rand_c_timestamp, rand_c_decimal, rand_c_enum)
+ |  insert into t1 values rand_row, rand_row, next_row_t1 on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp), c_enum=values(c_enum)
  |  insert into t1 values rand_row, rand_row, next_row_t1 on duplicate key update c_int = c_int + 1, c_str = concat(c_int, ':', c_str)
 
 common_insert_t2:
     insert into t2 values next_row_t2
- |  [weight=0.5] insert_or_replace into t2 values next_row_t2, next_row_t2, ({ print(T.c_int.seq2:head()-1) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
- |  insert_or_replace into t2 (c_int, c_str, c_datetime, c_double) values (rand_c_int_t2, rand_c_str, rand_c_datetime, rand_c_double)
- |  insert_or_replace into t2 (c_int, c_str, c_timestamp, c_decimal) values (next_c_int_t2, rand_c_str, rand_c_timestamp, rand_c_decimal), (rand_c_int_t2, rand_c_str, rand_c_timestamp, rand_c_decimal)
- |  insert into t2 values rand_row, rand_row, next_row_t2 on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp)
+ |  [weight=0.5] insert_or_replace into t2 values next_row_t2, next_row_t2, ({ print(T.c_int.seq2:head()-1) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum)
+ |  insert_or_replace into t2 (c_int, c_str, c_datetime, c_double, c_enum) values (rand_c_int_t2, rand_c_str, rand_c_datetime, rand_c_double, rand_c_enum)
+ |  insert_or_replace into t2 (c_int, c_str, c_timestamp, c_decimal, c_enum) values (next_c_int_t2, rand_c_str, rand_c_timestamp, rand_c_decimal, rand_c_enum), (rand_c_int_t2, rand_c_str, rand_c_timestamp, rand_c_decimal, rand_c_enum)
+ |  insert into t2 values rand_row, rand_row, next_row_t2 on duplicate key update c_int=values(c_int), c_str=values(c_str), c_double=values(c_double), c_timestamp=values(c_timestamp), c_enum=values(c_enum)
  |  insert into t2 values rand_row, rand_row, next_row_t2 on duplicate key update c_int = c_int + 1, c_str = concat(c_int, ':', c_str)
 
 common_update:
     update rand_table set c_str = rand_c_str where c_int = rand_c_int
+ |  update rand_table set c_enum = rand_c_enum where c_int = rand_c_int
  |  update rand_table set c_double = c_decimal, c_decimal = rand_c_decimal where c_int in (rand_c_int, rand_c_int, rand_c_int)
  |  update rand_table set c_datetime = c_timestamp, c_timestamp = rand_c_timestamp where c_str in (rand_c_str_or_null, rand_c_str_or_null, rand_c_str_or_null)
  |  update rand_table set c_int = c_int + 10, c_str = rand_c_str where c_int in (rand_c_int, { local k = T.c_int.rand_head(); print(k-math.random(3)) })
+ |  update rand_table set c_int = c_int + 10, c_enum = rand_c_enum where c_int in (rand_c_int, { local k = T.c_int.rand_head(); print(k-math.random(3)) })
  |  update rand_table set c_int = c_int + 5, c_str = rand_c_str_or_null where (c_int, c_str) in ((rand_c_int, rand_c_str), (rand_c_int, rand_c_str), (rand_c_int, rand_c_str))
  |  [weight=0.4] update rand_table set c_datetime = rand_c_datetime, c_timestamp = rand_c_timestamp, c_double = rand_c_double, c_decimal = rand_c_decimal where c_datetime is null maybe_write_limit
  |  [weight=0.4] update rand_table set c_datetime = rand_c_datetime, c_timestamp = rand_c_timestamp, c_double = rand_c_double, c_decimal = rand_c_decimal where c_decimal is null maybe_write_limit

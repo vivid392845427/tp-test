@@ -9,6 +9,18 @@
         c_timestamp = { range = util.range(1577836800, 1593561599) },
         c_double = { range = util.range(100) },
         c_decimal = { range = util.range(10) },
+        
+        collations = {'character set utf8mb4 collate utf8mb4_general_ci',
+                      'character set utf8mb4 collate utf8mb4_unicode_ci',
+                      'character set utf8mb4 collate utf8mb4_bin',
+                      'character set utf8 collate utf8_bin',
+                      'character set utf8 collate utf8_general_ci',
+                      'character set utf8 collate utf8_unicode_ci',
+                      'character set binary collate binary',
+                      'character set ascii collate ascii_bin',
+                      'character set latin1 collate latin1_bin'
+                     },
+        c_str_len = {range = util.range(1, 40)},
     }
 
     T.c_int.rand = function() return T.c_int.seq:rand() end
@@ -17,6 +29,8 @@
     T.c_timestamp.rand = function() return T.c_timestamp.range:randt() end
     T.c_double.rand = function() return T.c_double.range:randf() end
     T.c_decimal.rand = function() return T.c_decimal.range:randf() end
+    T.rand_collation = function() return util.choice(T.collations) end
+    T.c_str_len.rand = function() return T.c_str_len.range:randi() end
 
 }
 
@@ -27,7 +41,7 @@ txn: rand_queries
 create_table:
     create table t (
         c_int int,
-        c_str varchar(40),
+        c_str varchar(40) rand_collation,
         c_datetime datetime,
         c_timestamp timestamp,
         c_double double,
@@ -44,6 +58,12 @@ key_primary:
  |  , primary key(c_int)
  |  , primary key(c_str)
  |  , primary key(c_int, c_str)
+ |  , primary key(c_str(prefix_idx_len))
+ |  , primary key(c_int, c_str(prefix_idx_len))
+
+prefix_idx_len: { print(T.c_str_len.rand()) }
+
+rand_collation: { print(T.rand_collation()) }
 
 key_c_int:
  |  , key(c_int)
@@ -52,6 +72,8 @@ key_c_int:
 key_c_str:
  |  , key(c_str)
  |  , unique key(c_str)
+ |  , key(c_str(prefix_idx_len))
+ |  , unique key(c_str(prefix_idx_len))
 
 key_c_decimal:
  |  , key(c_decimal)
@@ -63,7 +85,7 @@ key_c_datetime:
 
 key_c_timestamp:
  |  , key(c_timestamp)
-
+ |  , unique key(c_timestamp) 
 
 insert_data:
     insert into t values next_row, next_row, next_row, next_row, next_row;
@@ -92,13 +114,16 @@ rand_queries:
 rand_query:
     [weight=0.3] common_select maybe_for_update
  |  [weight=0.2] (common_select maybe_for_update) union_or_union_all (common_select maybe_for_update)
+ |  [weight=0.2] (union_select maybe_for_update) union_or_union_all (union_select maybe_for_update)
  |  [weight=0.3] agg_select maybe_for_update
  |  [weight=0.2] (agg_select maybe_for_update) union_or_union_all (agg_select maybe_for_update)
  |  [weight=0.5] common_insert
  |  common_update
  |  common_delete
  |  common_update; common_delete; common_select
+ |  common_update; common_delete; expr_select
  |  common_insert; common_delete; common_select
+ |  common_insert; common_delete; expr_select
  |  common_delete; common_insert; common_update
  |  rollback;
 
@@ -108,10 +133,19 @@ maybe_write_limit: | [weight=2] order by c_int, c_str, c_double, c_decimal, c_da
 col_list: c_int, c_str, c_double, c_decimal, c_datetime, c_timestamp
 
 common_select:
+    select col_list from t where expr order by col_list
+    
+expr_select:
     select col_list maybe_col_exps from t where expr order by col_list
+    
+union_select:
+    select col_list union_col_exps from t where expr order by col_list
 
 maybe_col_exps: 
-  |, complex_numeric_col_exprs
+  , complex_numeric_col_exprs
+  
+union_col_exps: 
+  , complex_numeric_col_expr
 
 agg_select:
     select count(*) from t where c_timestamp between { t = T.c_timestamp.rand(); printf("'%s'", t) } and date_add({ printf("'%s'", t) }, interval 15 day)
@@ -169,7 +203,8 @@ predicate:
     
 
 complex_numeric_col_exprs:
-    [weight=2] complex_numeric_col_expr | complex_numeric_col_expr, complex_numeric_col_exprs
+    [weight=2] complex_numeric_col_expr 
+  | complex_numeric_col_expr, complex_numeric_col_exprs
 
 complex_numeric_col_expr:
     numeric_col_expr numeric_operator numeric_col_expr
