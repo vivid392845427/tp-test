@@ -59,7 +59,7 @@
 
 }
 
-init: create_table; insert_data; prepare_stmts
+init: drop table if exists t; create_table; insert_data; prepare_stmts
 
 txn: begin; rand_queries; commit
 

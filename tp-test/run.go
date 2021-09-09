@@ -160,6 +160,11 @@ func initTest(ctx context.Context, db *sql.DB, name string, t *Test, tiflashTbls
 }
 
 func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]string, error) {
+	if len(name) == 0 {
+		if err := db.QueryRow("select database()").Scan(&name); err != nil {
+			return nil, err
+		}
+	}
 	rows, err := db.QueryContext(ctx, "select table_name from information_schema.tables where table_schema = ?", name)
 	if err != nil {
 		return nil, err

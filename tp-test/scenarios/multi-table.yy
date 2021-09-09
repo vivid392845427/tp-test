@@ -80,7 +80,7 @@
 
 }
 
-init: set_session_attr; create_table; insert_data;
+init: set_session_attr; drop table if exists t1, t2; create_table; insert_data;
 
 txn: begin; rand_queries; commit
 
