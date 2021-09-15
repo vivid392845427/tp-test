@@ -46,11 +46,15 @@ func play(opts playOptions) error {
 
 		cfg, _ := mysql.ParseDSN(dsn)
 		cfg.DBName = fmt.Sprintf("%s_%s_%02d", opts.DBName, tag, i)
-
-		if _, err = ctl.Exec("create database if not exists " + cfg.DBName); err != nil {
+		if _, err = ctl.Exec("drop database if exists " + cfg.DBName); err != nil {
 			return nil, err
 		}
-		return sql.Open("mysql", cfg.FormatDSN())
+		if _, err = ctl.Exec("create database " + cfg.DBName); err != nil {
+			return nil, err
+		}
+		finalDSN := cfg.FormatDSN()
+		log.Printf("[%s:%d] open db: %s", tag, i, finalDSN)
+		return sql.Open("mysql", finalDSN)
 	}
 	initTest := func(test Test) Test {
 		test.ID = strconv.FormatInt(time.Now().Unix(), 10) + "." + uuid.New().String()
@@ -232,7 +236,7 @@ func runTest(ctx context.Context, test Test, db1 *sql.DB, db2 *sql.DB) error {
 		}
 		for t := range hs2 {
 			if hs1[t] != hs2[t] {
-				return fmt.Errorf("data mismatch @%s", t)
+				return fmt.Errorf("post check table %s: data mismatch", t)
 			}
 		}
 	}
