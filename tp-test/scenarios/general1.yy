@@ -46,9 +46,9 @@
     T.rand_c_enum = function() return util.choice(T.enums_set) end
 }
 
-init: create_table; create_view; insert_data
+init: drop view if exists v; drop table if exists t; create_table; create_view; insert_data
 
-txn: rand_queries
+txn: begin; rand_queries; commit
 
 create_table:
     create table t (

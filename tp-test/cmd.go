@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +40,7 @@ func rootCmd() *cobra.Command {
 	cmd.AddCommand(genTestCmd(&g))
 	cmd.AddCommand(runTestCmd(&g))
 	cmd.AddCommand(whyTestCmd(&g))
+	cmd.AddCommand(playCmd())
 	return cmd
 }
 
@@ -91,14 +95,14 @@ func genTestCmd(g *global) *cobra.Command {
 					return err
 				}
 				if dryrun {
-					fmt.Printf("-- T%d.0\n", i)
+					fmt.Printf("-- #%d init\n", i)
 					for _, stmt := range t.InitSQL {
 						fmt.Println(stmt + ";")
 					}
-					for k, txn := range t.Steps {
-						fmt.Printf("-- T%d.%d\n", i, k+1)
+					for k, txn := range t.Groups {
+						fmt.Printf("-- #%d txn[%d]\n", i, k)
 						for _, stmt := range txn {
-							fmt.Println(stmt.Stmt+"; -- query:", naiveQueryDetect(stmt.Stmt))
+							fmt.Println(stmt.Stmt + ";")
 						}
 					}
 				} else {
@@ -222,13 +226,8 @@ func whyTestCmd(g *global) *cobra.Command {
 			}
 
 			dumpStmts := func(seq int) {
-				var (
-					stmt    Stmt
-					lastTxn = -1
-				)
-				fmt.Println("-- init")
 				for _, stmt := range t.InitSQL {
-					fmt.Println(stmt + ";")
+					fmt.Println("/* INIT */ " + stmt + ";")
 				}
 
 				rows, err := db.Query("select stmt, txn from stmt where test_id = ? and seq <= ? order by seq", id, seq)
@@ -238,19 +237,12 @@ func whyTestCmd(g *global) *cobra.Command {
 				}
 				defer rows.Close()
 				for rows.Next() {
+					var stmt Stmt
 					if err := rows.Scan(&stmt.Stmt, &stmt.Txn); err != nil {
 						fmt.Println("oops: " + err.Error())
 						return
 					}
-					if lastTxn != stmt.Txn {
-						if lastTxn != -1 {
-							fmt.Println("commit;")
-						}
-						fmt.Printf("-- txn:%d\n", stmt.Txn)
-						fmt.Println("begin;")
-					}
-					fmt.Println(stmt.Stmt + ";")
-					lastTxn = stmt.Txn
+					fmt.Printf("/* T%-3d */ %s;\n", stmt.Txn, stmt.Stmt)
 				}
 				if err := rows.Err(); err != nil {
 					fmt.Println("oops: " + err.Error())
@@ -299,4 +291,68 @@ func whyTestCmd(g *global) *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func playCmd() *cobra.Command {
+	var opts playOptions
+	cmd := &cobra.Command{
+		Use:           "play",
+		Short:         "Generate & run tests",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			var (
+				yy   []byte
+				resp *http.Response
+			)
+			if strings.HasPrefix(args[0], "http") {
+				resp, err = http.Get(args[0])
+				if err != nil {
+					return err
+				}
+				yy, err = ioutil.ReadAll(resp.Body)
+				resp.Body.Close()
+			} else {
+				yy, err = ioutil.ReadFile(args[0])
+			}
+			if err != nil {
+				return err
+			}
+			opts.Grammar = string(yy)
+			opts.DSN1 = processDSN(opts.DSN1)
+			opts.DSN2 = processDSN(opts.DSN2)
+			return play(opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.InitRoot, "init-root", "init", "entry rule of initialization sql")
+	cmd.Flags().StringVar(&opts.TxnRoot, "txn-root", "txn", "entry rule of transaction")
+	cmd.Flags().IntVar(&opts.RecurLimit, "recur-limit", 15, "max recursion level for sql generation")
+	cmd.Flags().IntVar(&opts.NumTxn, "txn", 5, "number of transactions per test")
+	cmd.Flags().BoolVar(&opts.Debug, "debug", false, "enable debug option of generator")
+	cmd.Flags().Int64Var(&opts.Tests, "test", 1, "number of test to generate")
+	cmd.Flags().IntVar(&opts.Threads, "thread", 1, "number of worker threads")
+	cmd.Flags().StringVar(&opts.DSN1, "dsn1", "", "dsn for 1st database")
+	cmd.Flags().StringVar(&opts.DSN2, "dsn2", "", "dsn for 2nd database")
+	cmd.Flags().StringVar(&opts.DBName, "db", "tp_test", "basename of database")
+	cmd.Flags().StringVar(&opts.OutDir, "out", "tp_test_out.d", "directory to dump failures")
+	return cmd
+}
+
+func processDSN(dsn string) string {
+	if !strings.HasPrefix(dsn, "mysql://") {
+		return dsn
+	}
+	a, err := url.Parse(dsn)
+	if err != nil {
+		return dsn
+	}
+	var auth string
+	if a.User != nil {
+		pass, _ := a.User.Password()
+		auth = a.User.Username() + ":" + pass
+	} else {
+		auth = "root:"
+	}
+	return fmt.Sprintf("%s@tcp(%s)/?%s", auth, a.Host, a.RawQuery)
 }

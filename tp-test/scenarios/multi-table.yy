@@ -80,9 +80,9 @@
 
 }
 
-init: set_session_attr; create_table; insert_data;
+init: set_session_attr; drop table if exists t1, t2; create_table; insert_data;
 
-txn: rand_queries
+txn: begin; rand_queries; commit
 
 set_session_attr: set @@session.tidb_enable_list_partition = ON
 
@@ -166,21 +166,21 @@ parted_by_time:
     partition p1 values less than (to_days('2020-04-01')),
     partition p2 values less than (to_days('2020-06-01')),
     partition p3 values less than maxvalue)
-	
+
 list_parted_by_int:
     partition by list (c_int) (
     partition p0 values IN (1, 5, 9, 13, 17, 21, 25, 29, 33, 37),
     partition p1 values IN (2, 6, 10, 14, 18, 22, 26, 30, 34, 38),
     partition p2 values IN (3, 7, 11, 15, 19, 23, 27, 31, 35, 39),
     partition p3 values IN (4, 8, 12, 16, 20, 24, 28, 32, 36, 40))
-	
+
 list_coulumn_parted_by_int:
     partition by list columns(c_int) (
     partition p0 values IN (1, 5, 9, 13, 17, 21, 25, 29, 33, 37),
     partition p1 values IN (2, 6, 10, 14, 18, 22, 26, 30, 34, 38),
     partition p2 values IN (3, 7, 11, 15, 19, 23, 27, 31, 35, 39),
     partition p3 values IN (4, 8, 12, 16, 20, 24, 28, 32, 36, 40))
-    
+
 insert_data:
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;

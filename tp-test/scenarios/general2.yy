@@ -73,9 +73,9 @@
 
 }
 
-init: create_table; insert_data
+init: drop table if exists t; create_table; insert_data
 
-txn: rand_queries
+txn: begin; rand_queries; commit
 
 create_table:
     create table t (

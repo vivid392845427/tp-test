@@ -1,16 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -67,14 +62,7 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				log.Printf("no more test")
-				select {
-				case <-failed:
-					return nil
-				case <-ctx.Done():
-					return nil
-				case <-time.After(time.Duration(rand.Intn(10*opts.Threads)) * time.Second):
-					continue
-				}
+				return nil
 			}
 			return err
 		}
@@ -102,23 +90,11 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 		}
 
 		log.Printf("run test %s", t.ID)
-		for i := range t.Steps {
-			tx1, err1 := conn1.BeginTx(ctx, nil)
-			if err1 != nil {
-				closeConns()
-				return fmt.Errorf("start txn #%d of test(%s) on %s: %v", i, t.ID, opts.Tag1, err1)
-			}
-			tx2, err2 := conn2.BeginTx(ctx, nil)
-			if err2 != nil {
-				tx1.Rollback()
-				closeConns()
-				return fmt.Errorf("start txn #%d of test(%s) on %s: %v", i, t.ID, opts.Tag2, err2)
-			}
-
+		for i := range t.Groups {
 			fail := func(err error) error {
 				defer func() { recover() }()
-				tx1.Rollback()
-				tx2.Rollback()
+				conn1.ExecContext(ctx, "rollback")
+				conn2.ExecContext(ctx, "rollback")
 				closeConns()
 				store.SetTest(t.ID, TestFailed, err.Error())
 				log.Printf("test(%s) failed at txn #%d: %v", t.ID, i, err)
@@ -126,13 +102,8 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 				return err
 			}
 
-			if err := doTxn(ctx, opts, t, i, tx1, tx2); err != nil {
+			if err := doStmts(ctx, opts, t, i, conn1, conn2); err != nil {
 				return fail(err)
-			}
-
-			err1, err2 = tx1.Commit(), tx2.Commit()
-			if !validateErrs(err1, err2) {
-				return fail(fmt.Errorf("commit txn #%d: %v <> %v", i, err1, err2))
 			}
 
 			hs1, err1 := checkTables(ctx, opts.DB1, dbName1)
@@ -145,7 +116,7 @@ func runABTest(ctx context.Context, failed chan struct{}, opts runABTestOptions)
 			}
 			for t := range hs2 {
 				if hs1[t] != hs2[t] {
-					return fail(fmt.Errorf("data mismatch after txn #%d: %s != %s @%s", i, hs1[t], hs2[t], t))
+					return fail(fmt.Errorf("data mismatch @%s", t))
 				}
 			}
 		}
@@ -189,6 +160,11 @@ func initTest(ctx context.Context, db *sql.DB, name string, t *Test, tiflashTbls
 }
 
 func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]string, error) {
+	if len(name) == 0 {
+		if err := db.QueryRow("select database()").Scan(&name); err != nil {
+			return nil, err
+		}
+	}
 	rows, err := db.QueryContext(ctx, "select table_name from information_schema.tables where table_schema = ?", name)
 	if err != nil {
 		return nil, err
@@ -226,13 +202,13 @@ func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return unorderedDigest(rs, func(col resultset.ColumnDef) bool {
-		return col.Type != "JSON"
+	return rs.UnorderedDigest(func(i int, j int, raw []byte) bool {
+		return rs.ColumnDef(j).Type != "JSON"
 	}), nil
 }
 
-func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.Tx, tx2 *sql.Tx) error {
-	txn := t.Steps[i]
+func doStmts(ctx context.Context, opts runABTestOptions, t *Test, i int, s1 *sql.Conn, s2 *sql.Conn) error {
+	txn := t.Groups[i]
 
 	record := func(seq int, tag string, rs *resultset.ResultSet, err error) {
 		if rs != nil {
@@ -250,10 +226,10 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.
 
 	for _, stmt := range txn {
 		ctx1, _ := context.WithTimeout(ctx, time.Duration(opts.QueryTimeout)*time.Second)
-		rs1, err1 := doStmt(ctx1, tx1, stmt)
+		rs1, err1 := doStmt(ctx1, s1, stmt)
 		record(stmt.Seq, opts.Tag1, rs1, err1)
 		ctx2, _ := context.WithTimeout(ctx, time.Duration(opts.QueryTimeout)*time.Second)
-		rs2, err2 := doStmt(ctx2, tx2, stmt)
+		rs2, err2 := doStmt(ctx2, s2, stmt)
 		record(stmt.Seq, opts.Tag2, rs2, err2)
 		if !validateErrs(err1, err2) {
 			return fmt.Errorf("errors mismatch: %v <> %v @(%s,%d) %q", err1, err2, t.ID, stmt.Seq, stmt.Stmt)
@@ -262,69 +238,41 @@ func doTxn(ctx context.Context, opts runABTestOptions, t *Test, i int, tx1 *sql.
 			log.Printf("skip query error: [%v] [%v] @(%s,%d)", err1, err2, t.ID, stmt.Seq)
 			continue
 		}
+		cellFilter := func(i int, j int, raw []byte) bool {
+			if strings.Contains(stmt.Stmt, "union") {
+				typ := rs1.ColumnDef(j).Type
+				return typ != "FLOAT" && typ != "DOUBLE" && typ != "DECIMAL"
+			}
+			return true
+		}
 		h1, h2 := "", ""
 		if q := strings.ToLower(stmt.Stmt); stmt.IsQuery && rs1.NRows() == rs2.NRows() && rs1.NRows() > 1 &&
 			(!strings.Contains(q, "order by") || strings.Contains(q, "force-unordered")) {
-			h1, h2 = unorderedDigest(rs1, nil), unorderedDigest(rs2, nil)
+			h1, h2 = rs1.UnorderedDigest(cellFilter), rs2.UnorderedDigest(cellFilter)
 		} else {
-			h1, h2 = rs1.DataDigest(), rs2.DataDigest()
+			h1, h2 = rs1.DataDigest(cellFilter), rs2.DataDigest(cellFilter)
 		}
 		if h1 != h2 {
-			return fmt.Errorf("result digests mismatch: %s != %s @(%s,%d) %q", h1, h2, t.ID, stmt.Seq, stmt.Stmt)
+			return fmt.Errorf("result digests mismatch @(%s,%d) %q", t.ID, stmt.Seq, stmt.Stmt)
 		}
-		if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
-			return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
-				rs1.ExecResult().RowsAffected, rs2.ExecResult().RowsAffected, t.ID, stmt.Seq, stmt.Stmt)
-		}
+		//if rs1.IsExecResult() && rs1.ExecResult().RowsAffected != rs2.ExecResult().RowsAffected {
+		//	return fmt.Errorf("rows affected mismatch: %d != %d @(%s,%d) %q",
+		//		rs1.ExecResult().RowsAffected, rs2.ExecResult().RowsAffected, t.ID, stmt.Seq, stmt.Stmt)
+		//}
 	}
 	return nil
 }
 
-type rows [][]byte
-
-func (r rows) Len() int { return len(r) }
-
-func (r rows) Less(i, j int) bool { return bytes.Compare(r[i], r[j]) < 0 }
-
-func (r rows) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
-
-func unorderedDigest(rs *resultset.ResultSet, colFilter func(resultset.ColumnDef) bool) string {
-	if colFilter == nil {
-		colFilter = func(_ resultset.ColumnDef) bool { return true }
-	}
-	cols := make([]int, 0, rs.NCols())
-	for i := 0; i < rs.NCols(); i++ {
-		if colFilter(rs.ColumnDef(i)) {
-			cols = append(cols, i)
-		}
-	}
-	digests := make(rows, rs.NRows())
-	for i := 0; i < rs.NRows(); i++ {
-		h := sha1.New()
-		for _, j := range cols {
-			raw, _ := rs.RawValue(i, j)
-			h.Write(raw)
-		}
-		digests[i] = h.Sum(nil)
-	}
-	sort.Sort(digests)
-	h := sha1.New()
-	for _, digest := range digests {
-		h.Write(digest)
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-func doStmt(ctx context.Context, tx *sql.Tx, stmt Stmt) (*resultset.ResultSet, error) {
+func doStmt(ctx context.Context, s *sql.Conn, stmt Stmt) (*resultset.ResultSet, error) {
 	if stmt.IsQuery {
-		rows, err := tx.QueryContext(ctx, stmt.Stmt)
+		rows, err := s.QueryContext(ctx, "/* tp-test:q:"+stmt.TestID+":"+strconv.Itoa(stmt.Seq)+" */ "+stmt.Stmt)
 		if err != nil {
 			return nil, err
 		}
 		defer rows.Close()
 		return resultset.ReadFromRows(rows)
 	} else {
-		res, err := tx.ExecContext(ctx, stmt.Stmt)
+		res, err := s.ExecContext(ctx, "/* tp-test:e:"+stmt.TestID+":"+strconv.Itoa(stmt.Seq)+" */ "+stmt.Stmt)
 		if err != nil {
 			return nil, err
 		}
