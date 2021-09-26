@@ -236,7 +236,7 @@ write:
  |  common_delete
 
 common_update:
-    update t1_or_t2_partition set assignments where t_predicates order by c_int, c_str, c_decimal, c_double limit { print(math.random(2)) }
+    update t1_or_t2_partition set assignment where t_predicates order by c_int, c_str, c_decimal, c_double limit { print(math.random(2)) }
 
 assignments:
     [weight=9] assignment
