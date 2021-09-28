@@ -204,8 +204,8 @@ predicate:
  |  { print(util.choice({'c_decimal', 'c_double', 'c_datetime', 'c_timestamp'})) } is_null_or_not
 
 common_select:
-    select selected_cols from t where predicate
- |  select selected_cols from t where predicates
+    select selected_cols from t where predicate maybe_write_limit
+ |  select selected_cols from t where predicates maybe_write_limit
 
 agg_select:
     select count(*) from t where predicates
@@ -219,7 +219,7 @@ assignment:
  |  [weight=0.1] c_str = rand_strfunc(c_str)
 
 common_update:
-    update t set assignments where predicates maybe_write_limit
+    update t set assignment where predicates maybe_write_limit
 
 rows_to_ins: [weight=4] row_to_ins | row_to_ins, rows_to_ins
 
