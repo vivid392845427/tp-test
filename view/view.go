@@ -2,15 +2,16 @@ package view
 
 import (
 	"encoding/json"
-	"github.com/pingcap/go-randgen/grammar"
-	"github.com/pingcap/go-randgen/grammar/yacc_parser"
 	"net/http"
+
+	"github.com/pingcap/go-randgen/grammar"
+	"github.com/pingcap/go-randgen/grammar/parser"
 )
 
 type ProductionView struct {
-	Number int  `json:"number"`
-	Head   string  `json:"head"`
-	Alter  []*SeqView  `json:"alter"`
+	Number int        `json:"number"`
+	Head   string     `json:"head"`
+	Alter  []*SeqView `json:"alter"`
 }
 
 type SeqView struct {
@@ -19,23 +20,23 @@ type SeqView struct {
 }
 
 type arraySet struct {
-	arr  []int
-	set  map[int]bool
+	arr []int
+	set map[int]bool
 }
 
 func newArraySet() *arraySet {
 	return &arraySet{arr: make([]int, 0), set: make(map[int]bool)}
 }
 
-func (a *arraySet) add(num int)  {
+func (a *arraySet) add(num int) {
 	if !a.set[num] {
 		a.arr = append(a.arr, num)
 		a.set[num] = true
 	}
 }
 
-func productionToJson(productions []*yacc_parser.Production,
-	pMap map[string]*yacc_parser.Production) ([]byte, error) {
+func productionToJson(productions []*parser.Production,
+	pMap map[string]*parser.Production) ([]byte, error) {
 	pViews := make([]*ProductionView, 0)
 
 	for _, production := range productions {
@@ -52,7 +53,7 @@ func productionToJson(productions []*yacc_parser.Production,
 
 			fanout := newArraySet()
 			for _, item := range seq.Items {
-				if yacc_parser.NonTerminalInMap(pMap, item) {
+				if parser.NonTerminalInMap(pMap, item) {
 					fanout.add(pMap[item.OriginString()].Number)
 				}
 			}

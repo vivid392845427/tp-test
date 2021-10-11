@@ -1,4 +1,4 @@
-package sql_generator
+package sqlgen
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/pingcap/go-randgen/grammar/yacc_parser"
+	"github.com/pingcap/go-randgen/grammar/parser"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -86,7 +86,7 @@ func (p *PathInfo) clear() {
 // note that it is not thread safe
 type SQLRandomlyIterator struct {
 	productionName string
-	productionMap  map[string]*yacc_parser.Production
+	productionMap  map[string]*parser.Production
 	keyFuncs       KeyFuncs
 	luaVM          *lua.LState
 	printBuf       *bytes.Buffer
@@ -98,11 +98,11 @@ type SQLRandomlyIterator struct {
 }
 
 func NewSQLGen(yy string, fs KeyFuncs, setup func(*lua.LState, io.Writer) error) (*SQLRandomlyIterator, error) {
-	cs, ps, err := yacc_parser.Parse(yacc_parser.Tokenize(&yacc_parser.RuneSeq{Runes: []rune(yy), Pos: 0}))
+	cs, ps, err := parser.Parse(parser.Tokenize(&parser.RuneSeq{Runes: []rune(yy), Pos: 0}))
 	if err != nil {
 		return nil, err
 	}
-	pm := make(map[string]*yacc_parser.Production, len(ps))
+	pm := make(map[string]*parser.Production, len(ps))
 	for _, p := range ps {
 		if pp, ok := pm[p.Head.OriginString()]; ok {
 			pp.Alter = append(pp.Alter, p.Alter...)
@@ -157,14 +157,13 @@ func (i *SQLRandomlyIterator) PathInfo() *PathInfo {
 
 // visitor sqls generted by the iterator
 func (i *SQLRandomlyIterator) Visit(visitor SqlVisitor) error {
-
+	sqlBuffer := new(bytes.Buffer)
 	wrapper := func(sql string) bool {
 		res := visitor(sql)
 		i.pathInfo.clear()
+		sqlBuffer.Reset()
 		return res
 	}
-
-	sqlBuffer := &bytes.Buffer{}
 
 	for {
 		_, err := i.generateSQLRandomly(i.productionName, newLinkedMap(), sqlBuffer,
@@ -176,8 +175,6 @@ func (i *SQLRandomlyIterator) Visit(visitor SqlVisitor) error {
 		if err == normalStop || !wrapper(sqlBuffer.String()) {
 			return nil
 		}
-
-		sqlBuffer.Reset()
 	}
 
 	return nil
@@ -191,13 +188,13 @@ func getLuaPrintFun(buf *bytes.Buffer) func(*lua.LState) int {
 }
 
 // GenerateSQLSequentially returns a `SQLSequentialIterator` which can generate sql case by case randomly
-// productions is a `Production` array created by `yacc_parser.Parse`
+// productions is a `Production` array created by `parser.Parse`
 // productionName assigns a production name as the root node
 // maxRecursive is max bnf extend recursive number in sql generation
 // analyze flag is to open root cause analyze feature
 // if debug is true, the iterator will print all paths during generation
-func GenerateSQLRandomly(headCodeBlocks []*yacc_parser.CodeBlock,
-	productionMap map[string]*yacc_parser.Production,
+func GenerateSQLRandomly(headCodeBlocks []*parser.CodeBlock,
+	productionMap map[string]*parser.Production,
 	keyFuncs KeyFuncs, productionName string, maxRecursive int,
 	rng *rand.Rand, debug bool) (SQLIterator, error) {
 	l := lua.NewState()
@@ -264,9 +261,9 @@ func (i *SQLRandomlyIterator) printDebugInfo(word string, path *linkedMap) {
 	}
 }
 
-func willRecursive(seq *yacc_parser.Seq, set map[string]bool) bool {
+func willRecursive(seq *parser.Seq, set map[string]bool) bool {
 	for _, item := range seq.Items {
-		if yacc_parser.IsTknNonTerminal(item) && set[item.OriginString()] {
+		if parser.IsTknNonTerminal(item) && set[item.OriginString()] {
 			return true
 		}
 	}
@@ -300,7 +297,7 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 			nearMaxRecur[name] = true
 		}
 	}
-	selectableSeqs, totalWeight := make([]*yacc_parser.Seq, 0), .0
+	selectableSeqs, totalWeight := make([]*parser.Seq, 0), .0
 	for _, seq := range production.Alter {
 		if seq.Weight > 0 && !willRecursive(seq, nearMaxRecur) {
 			selectableSeqs = append(selectableSeqs, seq)
@@ -325,7 +322,7 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 	firstWrite := true
 
 	for index, item := range seqs.Items {
-		if yacc_parser.IsTerminal(item) || yacc_parser.NonTerminalNotInMap(i.productionMap, item) {
+		if parser.IsTerminal(item) || parser.NonTerminalNotInMap(i.productionMap, item) {
 			// terminal
 			i.printDebugInfo(item.OriginString(), recurCounter)
 
@@ -336,7 +333,6 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 					if !visitor(sqlBuffer.String()) {
 						return !firstWrite, normalStop
 					}
-					sqlBuffer.Reset()
 					firstWrite = true
 					continue
 				} else {
@@ -355,7 +351,7 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 
 			firstWrite = false
 
-		} else if yacc_parser.IsKeyword(item) {
+		} else if parser.IsKeyword(item) {
 			if err = handlePreSpace(firstWrite, parentPreSpace, item, sqlBuffer); err != nil {
 				return !firstWrite, err
 			}
@@ -374,7 +370,7 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 			} else {
 				return !firstWrite, fmt.Errorf("'%s' key word not support", item.OriginString())
 			}
-		} else if yacc_parser.IsCodeBlock(item) {
+		} else if parser.IsCodeBlock(item) {
 			if err = handlePreSpace(firstWrite, parentPreSpace, item, sqlBuffer); err != nil {
 				return !firstWrite, err
 			}
@@ -414,7 +410,7 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 	return !firstWrite, nil
 }
 
-func handlePreSpace(firstWrite bool, parentSpace bool, tkn yacc_parser.Token, writer io.StringWriter) error {
+func handlePreSpace(firstWrite bool, parentSpace bool, tkn parser.Token, writer io.StringWriter) error {
 	if firstWrite {
 		if parentSpace {
 			if err := writePreSpace(writer); err != nil {

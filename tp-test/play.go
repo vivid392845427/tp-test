@@ -193,6 +193,12 @@ func runTest(ctx context.Context, test Test, db1 *sql.DB, db2 *sql.DB) error {
 			wg.Wait()
 
 			// validate result
+			if err1 == sql.ErrConnDone {
+				return fmt.Errorf("dsn1 %v @(%s,%d) %q", err1, test.ID, stmt.Seq, stmt.Stmt)
+			}
+			if err2 == sql.ErrConnDone {
+				return fmt.Errorf("dsn2 %v @(%s,%d) %q", err2, test.ID, stmt.Seq, stmt.Stmt)
+			}
 			if !validateErrs(err1, err2) {
 				return fmt.Errorf("errors mismatch: %v <> %v @(%s,%d) %q", err1, err2, test.ID, stmt.Seq, stmt.Stmt)
 			}
@@ -242,6 +248,75 @@ func runTest(ctx context.Context, test Test, db1 *sql.DB, db2 *sql.DB) error {
 	}
 
 	return nil
+}
+
+func doStmt(ctx context.Context, s *sql.Conn, stmt Stmt) (*resultset.ResultSet, error) {
+	if stmt.IsQuery {
+		rows, err := s.QueryContext(ctx, "/* tp-test:q:"+stmt.TestID+":"+strconv.Itoa(stmt.Seq)+" */ "+stmt.Stmt)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return resultset.ReadFromRows(rows)
+	} else {
+		res, err := s.ExecContext(ctx, "/* tp-test:e:"+stmt.TestID+":"+strconv.Itoa(stmt.Seq)+" */ "+stmt.Stmt)
+		if err != nil {
+			return nil, err
+		}
+		return resultset.NewFromResult(res), nil
+	}
+}
+
+func validateErrs(err1 error, err2 error) bool {
+	return (err1 == nil && err2 == nil) || (err1 != nil && err2 != nil)
+}
+
+func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]string, error) {
+	if len(name) == 0 {
+		if err := db.QueryRow("select database()").Scan(&name); err != nil {
+			return nil, err
+		}
+	}
+	rows, err := db.QueryContext(ctx, "select table_name from information_schema.tables where table_schema = ?", name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	hs := make(map[string]string)
+	for rows.Next() {
+		var t string
+		if err = rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		if hs[t], err = checkTable(ctx, db, fmt.Sprintf("`%s`.`%s`", name, t)); err != nil {
+			return nil, err
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return hs, nil
+}
+
+func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
+	_, err := db.ExecContext(ctx, "admin check table "+name)
+	if err != nil {
+		if e, ok := err.(*mysql.MySQLError); !ok || e.Number != 1064 {
+			return "", err
+		}
+	}
+	rows, err := db.QueryContext(ctx, "select * from "+name)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	rs, err := resultset.ReadFromRows(rows)
+	if err != nil {
+		return "", err
+	}
+	return rs.UnorderedDigest(func(i int, j int, raw []byte) bool {
+		return rs.ColumnDef(j).Type != "JSON"
+	}), nil
 }
 
 func dumpTest(opts playOptions, test Test, err error) {

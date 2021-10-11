@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
@@ -9,12 +11,13 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
-	luaparse "github.com/yuin/gopher-lua/parse"
+	"github.com/yuin/gopher-lua/parse"
 
-	sqlgen "github.com/pingcap/go-randgen/grammar/sql_generator"
+	"github.com/pingcap/go-randgen/grammar/sqlgen"
 )
 
-//go:generate go run modernc.org/assets -d lib/ -o lib.generated.go --map luaLibs
+//go:embed lualib/*
+var lualib embed.FS
 
 type genTestOptions struct {
 	Grammar    string
@@ -118,15 +121,15 @@ func setup(L *lua.LState, out io.Writer) error {
 }
 
 func preloadLib(L *lua.LState, name string) error {
-	src, ok := luaLibs["/"+name+".lua"]
-	if !ok {
-		return errors.New("lib not found: " + name)
+	src, err := lualib.ReadFile("lualib/" + name + ".lua")
+	if err != nil {
+		return err
 	}
 	preload := L.GetField(L.GetField(L.Get(lua.EnvironIndex), "package"), "preload")
 	if _, ok := preload.(*lua.LTable); !ok {
 		return errors.New("package.preload must be a table")
 	}
-	chunk, err := luaparse.Parse(strings.NewReader(src), name)
+	chunk, err := parse.Parse(bytes.NewReader(src), name)
 	if err != nil {
 		return err
 	}

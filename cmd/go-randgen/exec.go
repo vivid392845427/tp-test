@@ -4,17 +4,18 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/pingcap/go-randgen/compare"
-	"github.com/pingcap/go-randgen/gendata"
-	"github.com/pingcap/go-randgen/grammar/sql_generator"
-	"github.com/sergi/go-diff/diffmatchpatch"
-	"github.com/spf13/cobra"
 	"io/ioutil"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
+
+	"github.com/fatih/color"
+	"github.com/pingcap/go-randgen/compare"
+	"github.com/pingcap/go-randgen/gendata"
+	"github.com/pingcap/go-randgen/grammar/sqlgen"
+	"github.com/sergi/go-diff/diffmatchpatch"
+	"github.com/spf13/cobra"
 )
 
 var dsn1 string
@@ -179,7 +180,7 @@ func execAction(cmd *cobra.Command, args []string) {
 	}
 
 	sqlIter := getIter(keyf)
-	err = sqlIter.Visit(sql_generator.FixedTimesVisitor(func(_ int, sql string) {
+	err = sqlIter.Visit(sqlgen.FixedTimesVisitor(func(_ int, sql string) {
 		consistent, dsn1Res, dsn2Res := compare.BySql(sql, db1, db2, !order)
 		if !consistent {
 			visitor(sql, dsn1Res, dsn2Res)
