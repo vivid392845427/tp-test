@@ -84,20 +84,39 @@ func (p *PathInfo) clear() {
 
 // SQLRandomlyIterator is a iterator of sql generator
 // note that it is not thread safe
-type SQLRandomlyIterator struct {
+type StmtGenerator struct {
 	productionName string
 	productionMap  map[string]*parser.Production
 	keyFuncs       KeyFuncs
 	luaVM          *lua.LState
 	printBuf       *bytes.Buffer
-	// path info
-	pathInfo     *PathInfo
-	maxRecursive int
-	rng          *rand.Rand
-	debug        bool
+	stmtCtx        *stmtContext
+	rng            *rand.Rand
+	maxRecursive   int
+	debug          bool
 }
 
-func NewSQLGen(yy string, fs KeyFuncs, setup func(*lua.LState, io.Writer) error) (*SQLRandomlyIterator, error) {
+type stmtContext struct {
+	buf  *bytes.Buffer
+	path *PathInfo
+	stmt Stmt
+}
+
+func (ctx *stmtContext) reset(vm *lua.LState, out io.Writer) Stmt {
+	stmt := ctx.stmt
+	stmt.setQuery(ctx.buf.String())
+	ctx.buf.Reset()
+	ctx.path.clear()
+	ctx.stmt = Stmt{}
+	ctx.stmt.registerLuaGlobal(vm, out)
+	return stmt
+}
+
+func newStmtContext() *stmtContext {
+	return &stmtContext{buf: new(bytes.Buffer), path: newPathInfo()}
+}
+
+func NewGenerator(yy string, fs KeyFuncs, setup func(*lua.LState, io.Writer) error) (*StmtGenerator, error) {
 	cs, ps, err := parser.Parse(parser.Tokenize(&parser.RuneSeq{Runes: []rune(yy), Pos: 0}))
 	if err != nil {
 		return nil, err
@@ -111,12 +130,12 @@ func NewSQLGen(yy string, fs KeyFuncs, setup func(*lua.LState, io.Writer) error)
 		}
 		pm[p.Head.OriginString()] = p
 	}
-	it := &SQLRandomlyIterator{
+	it := &StmtGenerator{
 		productionMap: pm,
 		keyFuncs:      fs,
 		luaVM:         lua.NewState(),
 		printBuf:      new(bytes.Buffer),
-		pathInfo:      newPathInfo(),
+		stmtCtx:       newStmtContext(),
 		rng:           rand.New(rand.NewSource(time.Now().UnixNano())),
 		maxRecursive:  15,
 	}
@@ -128,63 +147,52 @@ func NewSQLGen(yy string, fs KeyFuncs, setup func(*lua.LState, io.Writer) error)
 			return nil, err
 		}
 	}
+	it.stmtCtx.reset(it.luaVM, it.printBuf)
 	return it, nil
 }
 
-func (i *SQLRandomlyIterator) SetRoot(root string) *SQLRandomlyIterator {
-	i.productionName = root
-	return i
+func (gen *StmtGenerator) SetRoot(root string) *StmtGenerator {
+	gen.productionName = root
+	return gen
 }
 
-func (i *SQLRandomlyIterator) SetRand(rand *rand.Rand) *SQLRandomlyIterator {
-	i.rng = rand
-	return i
+func (gen *StmtGenerator) SetRand(rand *rand.Rand) *StmtGenerator {
+	gen.rng = rand
+	return gen
 }
 
-func (i *SQLRandomlyIterator) SetDebug(enabled bool) *SQLRandomlyIterator {
-	i.debug = enabled
-	return i
+func (gen *StmtGenerator) SetDebug(enabled bool) *StmtGenerator {
+	gen.debug = enabled
+	return gen
 }
 
-func (i *SQLRandomlyIterator) SetRecurLimit(limit int) *SQLRandomlyIterator {
-	i.maxRecursive = limit
-	return i
+func (gen *StmtGenerator) SetRecurLimit(limit int) *StmtGenerator {
+	gen.maxRecursive = limit
+	return gen
 }
 
-func (i *SQLRandomlyIterator) PathInfo() *PathInfo {
-	return i.pathInfo
+func (gen *StmtGenerator) PathInfo() *PathInfo {
+	return gen.stmtCtx.path
 }
 
-// visitor sqls generted by the iterator
-func (i *SQLRandomlyIterator) Visit(visitor SqlVisitor) error {
-	sqlBuffer := new(bytes.Buffer)
-	wrapper := func(sql string) bool {
-		res := visitor(sql)
-		i.pathInfo.clear()
-		sqlBuffer.Reset()
-		return res
+func (gen *StmtGenerator) Walk(callback func(stmt Stmt) bool) error {
+	_, err := gen.generate(gen.productionName, newLinkedMap(), false, callback)
+	if err == nil || err == normalStop {
+		return nil
 	}
-
-	for {
-		_, err := i.generateSQLRandomly(i.productionName, newLinkedMap(), sqlBuffer,
-			false, wrapper)
-		if err != nil && err != normalStop {
-			return err
-		}
-
-		if err == normalStop || !wrapper(sqlBuffer.String()) {
-			return nil
-		}
-	}
-
-	return nil
+	return err
 }
 
-func getLuaPrintFun(buf *bytes.Buffer) func(*lua.LState) int {
-	return func(state *lua.LState) int {
-		buf.WriteString(state.ToString(1))
-		return 0 // number of results
+func (gen *StmtGenerator) Generate() ([]Stmt, error) {
+	stmts := make([]Stmt, 0, 32)
+	err := gen.Walk(func(stmt Stmt) bool {
+		stmts = append(stmts, stmt)
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
+	return stmts, nil
 }
 
 // GenerateSQLSequentially returns a `SQLSequentialIterator` which can generate sql case by case randomly
@@ -197,66 +205,13 @@ func GenerateSQLRandomly(headCodeBlocks []*parser.CodeBlock,
 	productionMap map[string]*parser.Production,
 	keyFuncs KeyFuncs, productionName string, maxRecursive int,
 	rng *rand.Rand, debug bool) (SQLIterator, error) {
-	l := lua.NewState()
-	registerKeyFuncs(l, keyFuncs)
-	// run head code blocks
-	for _, codeblock := range headCodeBlocks {
-		if err := l.DoString(codeblock.OriginString()[1 : len(codeblock.OriginString())-1]); err != nil {
-			return nil, err
-		}
-	}
-
-	pBuf := &bytes.Buffer{}
-	// cover the origin lua print function
-	l.SetGlobal("print", l.NewFunction(getLuaPrintFun(pBuf)))
-	for k := range keyFuncs {
-		name := k
-		l.SetGlobal(name, l.NewClosure(func(L *lua.LState) int {
-			s, err := keyFuncs[name]()
-			if err != nil {
-				L.RaiseError(err.Error())
-			}
-			L.Push(lua.LString(s))
-			return 1
-		}))
-	}
-	if rng == nil {
-		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
-	}
-
-	return &SQLRandomlyIterator{
-		productionName: productionName,
-		productionMap:  productionMap,
-		keyFuncs:       keyFuncs,
-		luaVM:          l,
-		printBuf:       pBuf,
-		maxRecursive:   maxRecursive,
-		pathInfo:       newPathInfo(),
-		rng:            rng,
-		debug:          debug,
-	}, nil
-}
-
-func registerKeyFuncs(luaVM *lua.LState, keyFuncs KeyFuncs) {
-	for funName, function := range keyFuncs {
-		fun := function
-		luaVM.SetGlobal(funName, luaVM.NewFunction(func(state *lua.LState) int {
-			s, err := fun()
-			if err != nil {
-				state.Push(lua.LString(err.Error()))
-			} else {
-				state.Push(lua.LString(s))
-			}
-
-			return 1 // number of return params
-		}))
-	}
+	return nil, errors.New("deprecated")
 }
 
 var normalStop = errors.New("generateSQLRandomly: normal stop visit")
 
-func (i *SQLRandomlyIterator) printDebugInfo(word string, path *linkedMap) {
-	if i.debug {
+func (gen *StmtGenerator) printDebugInfo(word string, path *linkedMap) {
+	if gen.debug {
 		log.Printf("word `%s` path: %v\n", word, path.order)
 	}
 }
@@ -270,30 +225,30 @@ func willRecursive(seq *parser.Seq, set map[string]bool) bool {
 	return false
 }
 
-func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
-	recurCounter *linkedMap, sqlBuffer *bytes.Buffer,
-	parentPreSpace bool, visitor SqlVisitor) (hasWrite bool, err error) {
-	i.pathInfo.Depth += 1
-	defer func() { i.pathInfo.Depth -= 1 }()
+func (gen *StmtGenerator) generate(productionName string,
+	recurCounter *linkedMap, parentPreSpace bool,
+	callback func(stmt Stmt) bool) (hasWrite bool, err error) {
+	gen.stmtCtx.path.Depth += 1
+	defer func() { gen.stmtCtx.path.Depth -= 1 }()
 	// get root production
-	production, exist := i.productionMap[productionName]
+	production, exist := gen.productionMap[productionName]
 	if !exist {
 		return false, fmt.Errorf("Production '%s' not found", productionName)
 	}
-	i.pathInfo.ProductionSet.add(production)
+	gen.stmtCtx.path.ProductionSet.add(production)
 
 	// check max recursive count
 	recurCounter.enter(productionName)
 	defer func() {
 		recurCounter.leave(productionName)
 	}()
-	if recurCounter.m[productionName] > i.maxRecursive {
+	if recurCounter.m[productionName] > gen.maxRecursive {
 		return false, fmt.Errorf("`%s` expression recursive num exceed max loop back %d\n %v",
-			productionName, i.maxRecursive, recurCounter.order)
+			productionName, gen.maxRecursive, recurCounter.order)
 	}
 	nearMaxRecur := make(map[string]bool)
 	for name, count := range recurCounter.m {
-		if count == i.maxRecursive {
+		if count == gen.maxRecursive {
 			nearMaxRecur[name] = true
 		}
 	}
@@ -306,11 +261,11 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 	}
 	if len(selectableSeqs) == 0 {
 		return false, fmt.Errorf("recursive num exceed max loop back %d\n %v",
-			i.maxRecursive, recurCounter.order)
+			gen.maxRecursive, recurCounter.order)
 	}
 
 	// random an alter
-	selectIndex, thisWeight, targetWeight := 0, .0, i.rng.Float64()*totalWeight
+	selectIndex, thisWeight, targetWeight := 0, .0, gen.rng.Float64()*totalWeight
 	for ; selectIndex < len(selectableSeqs); selectIndex++ {
 		thisWeight += selectableSeqs[selectIndex].Weight
 		if thisWeight >= targetWeight {
@@ -318,50 +273,44 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 		}
 	}
 	seqs := selectableSeqs[selectIndex]
-	i.pathInfo.SeqSet.add(seqs)
+	gen.stmtCtx.path.SeqSet.add(seqs)
 	firstWrite := true
 
-	for index, item := range seqs.Items {
-		if parser.IsTerminal(item) || parser.NonTerminalNotInMap(i.productionMap, item) {
+	for _, item := range seqs.Items {
+		if parser.IsTerminal(item) || parser.NonTerminalNotInMap(gen.productionMap, item) {
 			// terminal
-			i.printDebugInfo(item.OriginString(), recurCounter)
+			gen.printDebugInfo(item.OriginString(), recurCounter)
 
 			// semicolon
 			if item.OriginString() == ";" {
-				// not last rune in bnf expression
-				if selectIndex != len(production.Alter)-1 || index != len(seqs.Items)-1 {
-					if !visitor(sqlBuffer.String()) {
-						return !firstWrite, normalStop
-					}
-					firstWrite = true
-					continue
-				} else {
-					// it is last rune -> just skip
-					continue
+				if !callback(gen.stmtCtx.reset(gen.luaVM, gen.printBuf)) {
+					return !firstWrite, normalStop
 				}
+				firstWrite = true
+				continue
 			}
 
-			if err = handlePreSpace(firstWrite, parentPreSpace, item, sqlBuffer); err != nil {
+			if err = handlePreSpace(firstWrite, parentPreSpace, item, gen.stmtCtx.buf); err != nil {
 				return !firstWrite, err
 			}
 
-			if _, err := sqlBuffer.WriteString(item.OriginString()); err != nil {
+			if _, err := gen.stmtCtx.buf.WriteString(item.OriginString()); err != nil {
 				return !firstWrite, err
 			}
 
 			firstWrite = false
 
 		} else if parser.IsKeyword(item) {
-			if err = handlePreSpace(firstWrite, parentPreSpace, item, sqlBuffer); err != nil {
+			if err = handlePreSpace(firstWrite, parentPreSpace, item, gen.stmtCtx.buf); err != nil {
 				return !firstWrite, err
 			}
 
 			// key word parse
-			if res, ok, err := i.keyFuncs.Gen(item.OriginString()); err != nil {
+			if res, ok, err := gen.keyFuncs.Gen(item.OriginString()); err != nil {
 				return !firstWrite, err
 			} else if ok {
-				i.printDebugInfo(res, recurCounter)
-				_, err := sqlBuffer.WriteString(res)
+				gen.printDebugInfo(res, recurCounter)
+				_, err := gen.stmtCtx.buf.WriteString(res)
 				if err != nil {
 					return !firstWrite, errors.New("fail to write `io.StringWriter`")
 				}
@@ -371,31 +320,29 @@ func (i *SQLRandomlyIterator) generateSQLRandomly(productionName string,
 				return !firstWrite, fmt.Errorf("'%s' key word not support", item.OriginString())
 			}
 		} else if parser.IsCodeBlock(item) {
-			if err = handlePreSpace(firstWrite, parentPreSpace, item, sqlBuffer); err != nil {
+			if err = handlePreSpace(firstWrite, parentPreSpace, item, gen.stmtCtx.buf); err != nil {
 				return !firstWrite, err
 			}
 
 			// lua code block
-			if err := i.luaVM.DoString(item.OriginString()[1 : len(item.OriginString())-1]); err != nil {
+			if err := gen.luaVM.DoString(item.OriginString()[1 : len(item.OriginString())-1]); err != nil {
 				log.Printf("lua code `%s`, run fail\n %v\n",
 					item.OriginString(), err)
 				return !firstWrite, err
 			}
-			if i.printBuf.Len() > 0 {
-				i.printDebugInfo(i.printBuf.String(), recurCounter)
-				sqlBuffer.WriteString(i.printBuf.String())
-				i.printBuf.Reset()
+			if gen.printBuf.Len() > 0 {
+				gen.printDebugInfo(gen.printBuf.String(), recurCounter)
+				gen.stmtCtx.buf.WriteString(gen.printBuf.String())
+				gen.printBuf.Reset()
 				firstWrite = false
 			}
 		} else {
 			// nonTerminal recursive
 			var hasSubWrite bool
 			if firstWrite {
-				hasSubWrite, err = i.generateSQLRandomly(item.OriginString(), recurCounter,
-					sqlBuffer, parentPreSpace, visitor)
+				hasSubWrite, err = gen.generate(item.OriginString(), recurCounter, parentPreSpace, callback)
 			} else {
-				hasSubWrite, err = i.generateSQLRandomly(item.OriginString(), recurCounter,
-					sqlBuffer, item.HasPreSpace(), visitor)
+				hasSubWrite, err = gen.generate(item.OriginString(), recurCounter, item.HasPreSpace(), callback)
 			}
 
 			if firstWrite && hasSubWrite {

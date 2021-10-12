@@ -51,12 +51,12 @@ func playCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.InitRoot, "init-root", "init", "entry rule of initialization sql")
-	cmd.Flags().StringVar(&opts.TxnRoot, "txn-root", "txn", "entry rule of transaction")
+	cmd.Flags().StringVar(&opts.TestRoot, "test-root", "test", "entry rule of test sql")
 	cmd.Flags().IntVar(&opts.RecurLimit, "recur-limit", 15, "max recursion level for sql generation")
-	cmd.Flags().IntVar(&opts.NumTxn, "txn", 5, "number of transactions per test")
+	cmd.Flags().IntVar(&opts.Tests, "tests", 5, "number of tests for each round")
 	cmd.Flags().BoolVar(&opts.Debug, "debug", false, "enable debug option of generator")
-	cmd.Flags().Int64Var(&opts.Tests, "test", 1, "number of test to generate")
-	cmd.Flags().IntVar(&opts.Threads, "thread", 1, "number of worker threads")
+	cmd.Flags().Int64Var(&opts.Rounds, "rounds", 1, "number of rounds to execute")
+	cmd.Flags().IntVar(&opts.Threads, "threads", 1, "number of worker threads")
 	cmd.Flags().StringVar(&opts.DSN1, "dsn1", "", "dsn for 1st database")
 	cmd.Flags().StringVar(&opts.DSN2, "dsn2", "", "dsn for 2nd database")
 	cmd.Flags().StringVar(&opts.DBName, "db", "tp_test", "basename of database")

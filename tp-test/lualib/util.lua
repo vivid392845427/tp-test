@@ -60,7 +60,7 @@ function choice(items)
     return items[math.random(#items)]
 end
 
-function quota(s, m)
+function quote(s, m)
     -- TODO: handle escape chars
     m = m or "'"
     return m .. s .. m
@@ -71,5 +71,5 @@ return {
     seq = Seq.new,
     range = Range.new,
     choice = choice,
-    quota = quota,
+    quote = quote,
 }
