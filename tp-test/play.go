@@ -30,6 +30,7 @@ type playOptions struct {
 	OutDir  string
 	Rounds  int64
 	Threads int
+	DryRun  bool
 }
 
 func play(opts playOptions) error {
@@ -37,6 +38,17 @@ func play(opts playOptions) error {
 		cnt int64
 		g   errgroup.Group
 	)
+	if opts.DryRun {
+		for i := int64(0); i < opts.Rounds; i++ {
+			fmt.Fprintf(os.Stdout, "-- ROUND %d\n", i)
+			t, err := genTest(opts.genTestOptions)
+			if err != nil {
+				return err
+			}
+			dumpTest(os.Stdout, opts, t, nil)
+		}
+		return nil
+	}
 	openDB := func(dsn string, tag string, i int) (*sql.DB, error) {
 		ctl, err := sql.Open("mysql", dsn)
 		if err != nil {
@@ -82,7 +94,7 @@ func play(opts playOptions) error {
 					if firstErr == nil {
 						firstErr = err
 					}
-					dumpTest(opts, test, err)
+					dumpTest(nil, opts, test, err)
 					continue
 				}
 			}
@@ -328,28 +340,33 @@ func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
 
 }
 
-func dumpTest(opts playOptions, test TestRound, err error) {
-	name := filepath.Join(opts.OutDir, test.ID+".txt")
-	log.Printf("dump failure info to " + name)
-	os.MkdirAll(opts.OutDir, 0755)
-	f, e := os.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-	if e != nil {
-		log.Printf("cannot open file: %v", e)
-		return
+func dumpTest(out io.Writer, opts playOptions, test TestRound, err error) {
+	if out == nil {
+		name := filepath.Join(opts.OutDir, test.ID+".txt")
+		log.Printf("dump failure info to " + name)
+		os.MkdirAll(opts.OutDir, 0755)
+		f, e := os.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		if e != nil {
+			log.Printf("cannot open file: %v", e)
+			return
+		}
+		defer f.Close()
+		out = f
 	}
-	defer f.Close()
 	for _, stmt := range test.Init {
-		fmt.Fprintln(f, "/* INIT */ "+stmt.String())
+		fmt.Fprintf(out, "/* INIT */ %s\n", stmt.String())
 	}
 	seq := 0
 	for _, test := range test.Tests {
 		for _, stmt := range test {
 			seq++
-			fmt.Fprintf(f, "/* T%03d */ %s\n", seq, stmt.String())
+			fmt.Fprintf(out, "/* S%03d */ %s\n", seq, stmt.String())
 		}
 	}
-	fmt.Fprintln(f, "---------")
-	fmt.Fprintln(f, err.Error())
+	if err != nil {
+		fmt.Fprintln(out, "---------")
+		fmt.Fprintln(out, err.Error())
+	}
 }
 
 type ErrResultMismatch struct {

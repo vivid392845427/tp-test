@@ -1,6 +1,7 @@
 package sqlgen
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -44,7 +45,8 @@ func (stmt Stmt) String() string {
 		buf.WriteString(" --")
 		if len(stmt.Params) > 0 {
 			buf.WriteString(" params: ")
-			fmt.Fprintf(buf, "%v", stmt.Params)
+			params, _ := json.Marshal(stmt.Params)
+			buf.Write(params)
 		}
 		if len(flags) > 0 {
 			buf.WriteString(" flags: ")

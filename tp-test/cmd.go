@@ -61,6 +61,7 @@ func playCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.DSN2, "dsn2", "", "dsn for 2nd database")
 	cmd.Flags().StringVar(&opts.DBName, "db", "tp_test", "basename of database")
 	cmd.Flags().StringVar(&opts.OutDir, "out", "tp_test_out.d", "directory to dump failures")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "only print generated queries")
 	return cmd
 }
 
