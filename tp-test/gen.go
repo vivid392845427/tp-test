@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -147,6 +148,22 @@ func setup(L *lua.LState, out io.Writer) error {
 		}
 		L.Push(lua.LString(t.UTC().Format(format)))
 		return 1
+	}))
+	L.SetGlobal("debug", L.NewFunction(func(L *lua.LState) int {
+		top := L.GetTop()
+		if top > 0 {
+			fmt.Fprint(os.Stderr, "\x1b[0;31m")
+		}
+		for i := 1; i <= top; i++ {
+			fmt.Fprint(os.Stderr, L.ToStringMeta(L.Get(i)).String())
+			if i != top {
+				fmt.Fprint(os.Stderr, " ")
+			}
+		}
+		if top > 0 {
+			fmt.Fprint(os.Stderr, "\x1b[0m")
+		}
+		return 0
 	}))
 	L.SetGlobal("random_name", L.NewFunction(func(L *lua.LState) int {
 		n := adjectives[rand.Intn(len(adjectives))] + " " + surnames[rand.Intn(len(surnames))]

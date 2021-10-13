@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/pingcap/go-randgen/grammar/parser"
@@ -330,7 +331,20 @@ func (gen *StmtGenerator) generate(productionName string,
 
 			// lua code block
 			if err := gen.luaVM.DoString(item.OriginString()[1 : len(item.OriginString())-1]); err != nil {
-				log.Printf("lua code `%s`, run fail\n %v\n",
+				path := new(strings.Builder)
+				path.WriteString("generate path:")
+				for _, seq := range gen.stmtCtx.path.SeqSet.Seqs {
+					path.WriteString("\n\t")
+					for _, p := range gen.productionMap {
+						if p.Number == seq.PNumber {
+							path.WriteString(p.Head.OriginString())
+							path.WriteString(": ")
+							path.WriteString(seq.String())
+							break
+						}
+					}
+				}
+				log.Printf("lua code `%s`, run fail\n %v\n"+path.String(),
 					item.OriginString(), err)
 				return !firstWrite, err
 			}

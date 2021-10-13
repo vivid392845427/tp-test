@@ -360,7 +360,7 @@ func dumpTest(out io.Writer, opts playOptions, test TestRound, err error) {
 	for i, test := range test.Tests {
 		for _, stmt := range test {
 			seq++
-			fmt.Fprintf(out, "/* %02d:%03d */ %s\n", i, seq, stmt.String())
+			fmt.Fprintf(out, "/* %02d:%03d */ %s\n", i+1, seq, stmt.String())
 		}
 	}
 	if err != nil {
