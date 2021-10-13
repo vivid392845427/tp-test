@@ -357,10 +357,10 @@ func dumpTest(out io.Writer, opts playOptions, test TestRound, err error) {
 		fmt.Fprintf(out, "/* INIT */ %s\n", stmt.String())
 	}
 	seq := 0
-	for _, test := range test.Tests {
+	for i, test := range test.Tests {
 		for _, stmt := range test {
 			seq++
-			fmt.Fprintf(out, "/* S%03d */ %s\n", seq, stmt.String())
+			fmt.Fprintf(out, "/* %02d:%03d */ %s\n", i, seq, stmt.String())
 		}
 	}
 	if err != nil {

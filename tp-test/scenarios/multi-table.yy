@@ -80,17 +80,24 @@
 
 }
 
-init: set_session_attr; drop table if exists t1, t2; create_table; insert_data;
+init:
+    set_session_attr
+    drop table if exists t1, t2;
+    create_table
+    insert_data
 
-txn: begin; rand_queries; commit
+test:
+    begin;
+    rand_queries
+    commit;
 
-set_session_attr: set @@session.tidb_enable_list_partition = ON
+set_session_attr: set @@session.tidb_enable_list_partition = ON;
 
 create_table:
     create table t1 { T.current_table = 1 } table_defs;
-    create table t2 { T.current_table = 2 } like t1 { T.count_create_like = T.count_create_like + 1; T.mark_dup() }
+    create table t2 { T.current_table = 2 } like t1 { T.count_create_like = T.count_create_like + 1; T.mark_dup() };
  |  create table t1 { T.current_table = 1 } table_defs;
-    create table t2 { T.current_table = 2 } table_defs
+    create table t2 { T.current_table = 2 } table_defs;
 
 key_primary:
  |  , primary key(c_int) { T.mark_id('c_int') }
@@ -184,11 +191,11 @@ list_coulumn_parted_by_int:
 insert_data:
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
-    insert into t2 select * from t1 { T.c_int.seq2._n = T.c_int.seq1._n }
+    insert into t2 select * from t1 { T.c_int.seq2._n = T.c_int.seq1._n };
  |  insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t2 values next_row_t2, next_row_t2, next_row_t2, next_row_t2, next_row_t2;
-    insert into t2 values next_row_t2, next_row_t2, next_row_t2, next_row_t2, next_row_t2
+    insert into t2 values next_row_t2, next_row_t2, next_row_t2, next_row_t2, next_row_t2;
 
 next_row_t1: (next_c_int_t1, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum)
 next_row_t2: (next_c_int_t2, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum)
@@ -217,7 +224,7 @@ t2_or_t2_partition: t2 | { if T.both_parted() then printf('t2 partition (p%d)', 
 tt_or_tt_partition: t1, t2 | { local p = math.random(0, 3); if T.both_parted() then printf('t1 partition (p%d), t2 partition (p%d)', p, p) else print('t1, t2') end }
 
 rand_queries:
-    rand_query; rand_query; rand_query; rand_query
+    rand_query; rand_query; rand_query; rand_query;
  |  [weight=9] rand_query; rand_queries
 
 rand_query:
