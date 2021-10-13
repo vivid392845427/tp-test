@@ -260,7 +260,7 @@ assignment:
  |  [weight=0.1] c_str = rand_strfunc(c_str)
 
 common_update:
-    update t set assignments where predicates maybe_write_limit
+    update t set assignment where predicates maybe_write_limit
 
 rows_to_ins: [weight=4] row_to_ins | row_to_ins, rows_to_ins
 
