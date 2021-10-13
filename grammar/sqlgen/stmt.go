@@ -99,6 +99,31 @@ func (stmt *Stmt) registerLuaGlobal(vm *lua.LState, out io.Writer) {
 		out.Write([]byte{'?'})
 		return 0
 	}))
+	vm.SetGlobal("stmt_add_params", vm.NewFunction(func(L *lua.LState) int {
+		for i := 1; i <= L.GetTop(); i++ {
+			v := L.Get(i)
+			if v == lua.LNil || v == nil {
+				stmt.Params = append(stmt.Params, nil)
+				continue
+			}
+			switch x := v.(type) {
+			case lua.LNumber:
+				vf, vi := float64(x), int64(x)
+				if math.Abs(vf-float64(vi)) < 1e-8 {
+					stmt.Params = append(stmt.Params, vi)
+				} else {
+					stmt.Params = append(stmt.Params, vf)
+				}
+			case lua.LString:
+				stmt.Params = append(stmt.Params, string(x))
+			case lua.LBool:
+				stmt.Params = append(stmt.Params)
+			default:
+				vm.ArgError(i, fmt.Sprintf("%s :: %s", v.String(), v.Type().String()))
+			}
+		}
+		return 0
+	}))
 }
 
 func (stmt *Stmt) setQuery(query string) {

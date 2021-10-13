@@ -109,6 +109,10 @@ func (ctx *stmtContext) reset(vm *lua.LState, out io.Writer) Stmt {
 	ctx.path.clear()
 	ctx.stmt = Stmt{}
 	ctx.stmt.registerLuaGlobal(vm, out)
+	vm.SetGlobal("current_query", vm.NewFunction(func(L *lua.LState) int {
+		L.Push(lua.LString(ctx.buf.String()))
+		return 1
+	}))
 	return stmt
 }
 
