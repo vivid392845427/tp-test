@@ -24,9 +24,9 @@
     }
 
     G.c_int.rand = function() return G.c_int.seq:rand() end
-    G.c_str.rand = function() return util.quota(random_name()) end
-    G.c_datetime.rand = function() return util.quota(G.c_datetime.range:randt()) end
-    G.c_timestamp.rand = function() return util.quota(G.c_timestamp.range:randt()) end
+    G.c_str.rand = function() return util.quote(random_name()) end
+    G.c_datetime.rand = function() return util.quote(G.c_datetime.range:randt()) end
+    G.c_timestamp.rand = function() return util.quote(G.c_timestamp.range:randt()) end
     G.c_double.rand = function() return sprintf('%.6f', G.c_double.range:randf()) end
     G.c_decimal.rand = function() return sprintf('%.3f', G.c_decimal.range:randf()) end
     G.rand_collation = function() return util.choice(G.collations) end
@@ -41,7 +41,7 @@
                                     end
                                     return enum_values
                         end
-    G.rand_c_enum = function() return util.quota(util.choice(G.enums_set)) end
+    G.rand_c_enum = function() return util.quote(util.choice(G.enums_set)) end
 
     T = {
         cols = {},
@@ -75,7 +75,7 @@
 
 init: drop table if exists t; create_table; insert_data
 
-txn: begin; rand_queries; commit
+test: begin; rand_queries; commit;
 
 create_table:
     create table t (
@@ -145,7 +145,7 @@ key_c_set:
 
 insert_data:
     insert into t values next_row, next_row, next_row, next_row, next_row;
-    insert into t values next_row, next_row, next_row, next_row, next_row
+    insert into t values next_row, next_row, next_row, next_row, next_row;
 
 next_row: (next_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum, rand_c_set)
 rand_row: (rand_c_int, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal, rand_c_enum, rand_c_set)
