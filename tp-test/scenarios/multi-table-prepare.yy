@@ -272,7 +272,7 @@ predicates:
  |  predicate2
  
 update_predicates:
-    predicate1 rand_logic predicates
+    predicate1 rand_logic update_predicates
  |  predicate1
  |  update_predicate2
 
