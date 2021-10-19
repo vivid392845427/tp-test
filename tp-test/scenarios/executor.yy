@@ -13,9 +13,9 @@
     }
 
     G.c_int.rand = function() if math.random() < 0.5 then return G.c_int.seq1:rand() else return G.c_int.seq2:rand() end end
-    G.c_str.rand = function() return util.quota(random_name()) end
-    G.c_datetime.rand = function() return util.quota(G.c_datetime.range:randt()) end
-    G.c_timestamp.rand = function() return util.quota(G.c_timestamp.range:randt()) end
+    G.c_str.rand = function() return util.quote(random_name()) end
+    G.c_datetime.rand = function() return util.quote(G.c_datetime.range:randt()) end
+    G.c_timestamp.rand = function() return util.quote(G.c_timestamp.range:randt()) end
     G.c_double.rand = function() return sprintf('%.6f', G.c_double.range:randf()) end
     G.c_decimal.rand = function() return sprintf('%.3f', G.c_decimal.range:randf()) end
     G.rand_join_hint = function() return util.choice(G.join_hints) end
@@ -80,14 +80,14 @@
 
 init:
     drop table if exists t1, t2;
-    create_tables;
+    create_tables
     insert_data
 
 create_tables:
     create table t1 { T.cur_table = 1 } table_defs;
-    create table t2 { T.cur_table = 2 } like t1 { T.on_create_table_like() }
+    create table t2 { T.cur_table = 2 } like t1 { T.on_create_table_like() };
  |  create table t1 { T.cur_table = 1 } table_defs;
-    create table t2 { T.cur_table = 2 } table_defs
+    create table t2 { T.cur_table = 2 } table_defs;
 
 table_defs:
     [weight=3] (table_cols table_full_keys)
@@ -152,26 +152,29 @@ parted_by_time:
 insert_data:
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
-    insert into t2 select * from t1 { G.c_int.seq2._n = G.c_int.seq1._n }
+    insert into t2 select * from t1 { G.c_int.seq2._n = G.c_int.seq1._n };
  |  insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t1 values next_row_t1, next_row_t1, next_row_t1, next_row_t1, next_row_t1;
     insert into t2 values next_row_t2, next_row_t2, next_row_t2, next_row_t2, next_row_t2;
-    insert into t2 values next_row_t2, next_row_t2, next_row_t2, next_row_t2, next_row_t2
+    insert into t2 values next_row_t2, next_row_t2, next_row_t2, next_row_t2, next_row_t2;
 
 next_row_t1: ({ print(G.c_int.seq1:next()) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
 next_row_t2: ({ print(G.c_int.seq2:next()) }, rand_c_str, rand_c_datetime, rand_c_timestamp, rand_c_double, rand_c_decimal)
 
-# QUERIES
+# TEST
 
-txn:
+test:
     reads
- |  begin; writes; reads; commit_or_rollback
+ |  begin;
+    writes
+    reads
+    commit_or_rollback
 
 t1_or_t2: t1 { T.cur_table = 1 } | t2 { T.cur_table = 2 }
 t1_or_t2_partition: t1_or_t1_partition | t2_or_t2_partition
 t1_or_t1_partition: t1 { T.cur_table = 1 } | [weight=0.5] { T.cur_table = 1; if T.count_partitions[1] > 0 then printf('t1 partition (p%d)', math.random(0, T.count_partitions[1]-1)) else print('t1') end }
 t2_or_t2_partition: t2 { T.cur_table = 2 } | [weight=0.5] { T.cur_table = 2; if T.count_partitions[2] > 0 then printf('t2 partition (p%d)', math.random(0, T.count_partitions[2]-1)) else print('t2') end }
-commit_or_rollback: commit | [weight=0.2] rollback
+commit_or_rollback: commit; | [weight=0.2] rollback;
 union_or_union_all: union | union all
 insert_or_replace: insert | replace
 null_or_not: null | not null
@@ -228,7 +231,7 @@ tt_predicate2:
 
 writes:
     [weight=9] write; writes
- |  write
+ |  write;
 
 write:
     common_update
@@ -236,7 +239,7 @@ write:
  |  common_delete
 
 common_update:
-    update t1_or_t2_partition set assignments where t_predicates order by c_int, c_str, c_decimal, c_double limit { print(math.random(2)) }
+    update t1_or_t2_partition set assignment where t_predicates order by c_int, c_str, c_decimal, c_double limit { print(math.random(2)) }
 
 assignments:
     [weight=9] assignment
@@ -261,7 +264,7 @@ common_delete:
 
 reads:
     [weight=9] read; reads
- |  read; read; read; read; read; read; read; read; read
+ |  read; read; read; read; read; read; read; read; read;
 
 read:
     select_simple_join

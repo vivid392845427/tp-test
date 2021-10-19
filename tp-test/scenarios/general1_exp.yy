@@ -36,7 +36,7 @@
 
 init: create_table; insert_data
 
-txn: rand_queries
+test: begin; rand_queries; commit;
 
 create_table:
     create table t (

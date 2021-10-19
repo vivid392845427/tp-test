@@ -1,64 +1,104 @@
 package main
 
 import (
+	"bytes"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/pingcap/go-randgen/grammar/sqlgen"
 	lua "github.com/yuin/gopher-lua"
-	luaparse "github.com/yuin/gopher-lua/parse"
-
-	sqlgen "github.com/pingcap/go-randgen/grammar/sql_generator"
+	"github.com/yuin/gopher-lua/parse"
 )
 
-//go:generate go run modernc.org/assets -d lib/ -o lib.generated.go --map luaLibs
+type StmtList []sqlgen.Stmt
+
+type TestRound struct {
+	ID    string
+	Init  StmtList
+	Tests []StmtList
+}
 
 type genTestOptions struct {
 	Grammar    string
 	InitRoot   string
-	TxnRoot    string
+	TestRoot   string
 	RecurLimit int
-	NumTxn     int
+	Tests      int
 	Debug      bool
 }
 
-func genTest(opts genTestOptions) (test Test, err error) {
+func genTest(opts genTestOptions) (test TestRound, err error) {
 	rand.Seed(time.Now().UnixNano())
+	test.ID = strconv.FormatInt(time.Now().Unix(), 10) + "." + uuid.New().String()
 
-	it, err := sqlgen.NewSQLGen(opts.Grammar, nil, setup)
+	gen, err := sqlgen.NewGenerator(opts.Grammar, nil, setup)
 	if err != nil {
-		return Test{}, err
+		return TestRound{}, err
 	}
-	it.SetRecurLimit(opts.RecurLimit).SetDebug(opts.Debug)
+	gen.SetRecurLimit(opts.RecurLimit).SetDebug(opts.Debug)
 
-	it.SetRoot(opts.InitRoot)
-	err = it.Visit(func(sql string) bool {
-		test.InitSQL = append(test.InitSQL, sql)
-		return it.PathInfo().Depth != 0
-	})
+	lst, err := gen.SetRoot(opts.InitRoot).Generate()
 	if err != nil {
-		return Test{}, err
+		return TestRound{}, err
 	}
+	test.Init = lst
 
-	it.SetRoot(opts.TxnRoot)
-	for i := 0; i < opts.NumTxn; i++ {
-		txn := make(StmtList, 0, 8)
-		err = it.Visit(func(sql string) bool {
-			txn = append(txn, Stmt{Stmt: sql})
-			return it.PathInfo().Depth != 0
-		})
+	gen.SetRoot(opts.TestRoot)
+	for i := 0; i < opts.Tests; i++ {
+		lst, err = gen.Generate()
 		if err != nil {
-			return Test{}, err
+			return TestRound{}, err
 		}
-		test.Groups = append(test.Groups, txn)
+		test.Tests = append(test.Tests, lst)
 	}
 	return
 }
 
 func setup(L *lua.LState, out io.Writer) error {
+	global := make(map[string]lua.LValue)
+	val := func(L *lua.LState, v lua.LValue) int {
+		if v == nil {
+			L.Push(lua.LNil)
+		} else {
+			L.Push(v)
+		}
+		return 1
+	}
+	L.SetGlobal("set", L.NewFunction(func(L *lua.LState) int {
+		k := L.CheckString(1)
+		v := L.CheckAny(2)
+		old := global[k]
+		global[k] = v
+		return val(L, old)
+	}))
+	L.SetGlobal("del", L.NewFunction(func(L *lua.LState) int {
+		k := L.CheckString(1)
+		old := global[k]
+		delete(global, k)
+		return val(L, old)
+	}))
+	L.SetGlobal("get", L.NewFunction(func(L *lua.LState) int {
+		k := L.CheckString(1)
+		v, ok := global[k]
+		if !ok && L.GetTop() > 1 {
+			v = L.CheckAny(2)
+		}
+		return val(L, v)
+	}))
+	L.SetGlobal("exists", L.NewFunction(func(L *lua.LState) int {
+		k := L.CheckString(1)
+		_, ok := global[k]
+		return val(L, lua.LBool(ok))
+	}))
+
 	L.SetGlobal("print", L.NewFunction(func(L *lua.LState) int {
 		top := L.GetTop()
 		for i := 1; i <= top; i++ {
@@ -109,6 +149,22 @@ func setup(L *lua.LState, out io.Writer) error {
 		L.Push(lua.LString(t.UTC().Format(format)))
 		return 1
 	}))
+	L.SetGlobal("debug", L.NewFunction(func(L *lua.LState) int {
+		top := L.GetTop()
+		if top > 0 {
+			fmt.Fprint(os.Stderr, "\x1b[0;31m")
+		}
+		for i := 1; i <= top; i++ {
+			fmt.Fprint(os.Stderr, L.ToStringMeta(L.Get(i)).String())
+			if i != top {
+				fmt.Fprint(os.Stderr, " ")
+			}
+		}
+		if top > 0 {
+			fmt.Fprint(os.Stderr, "\x1b[0m")
+		}
+		return 0
+	}))
 	L.SetGlobal("random_name", L.NewFunction(func(L *lua.LState) int {
 		n := adjectives[rand.Intn(len(adjectives))] + " " + surnames[rand.Intn(len(surnames))]
 		L.Push(lua.LString(n))
@@ -117,16 +173,19 @@ func setup(L *lua.LState, out io.Writer) error {
 	return preloadLib(L, "util")
 }
 
+//go:embed lualib/*
+var lualib embed.FS
+
 func preloadLib(L *lua.LState, name string) error {
-	src, ok := luaLibs["/"+name+".lua"]
-	if !ok {
-		return errors.New("lib not found: " + name)
+	src, err := lualib.ReadFile("lualib/" + name + ".lua")
+	if err != nil {
+		return err
 	}
 	preload := L.GetField(L.GetField(L.Get(lua.EnvironIndex), "package"), "preload")
 	if _, ok := preload.(*lua.LTable); !ok {
 		return errors.New("package.preload must be a table")
 	}
-	chunk, err := luaparse.Parse(strings.NewReader(src), name)
+	chunk, err := parse.Parse(bytes.NewReader(src), name)
 	if err != nil {
 		return err
 	}

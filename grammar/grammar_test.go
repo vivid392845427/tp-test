@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/pingcap/go-randgen/grammar/sql_generator"
+	"github.com/pingcap/go-randgen/grammar/sqlgen"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -18,7 +18,7 @@ type yyTestCase struct {
 	name      string
 	yy        string
 	num       int
-	keyFuncs  sql_generator.KeyFuncs
+	keyFuncs  sqlgen.KeyFuncs
 	simpleExp string
 	expected  func(string) bool
 	expSeq    []string
@@ -159,7 +159,7 @@ query:{table = _table()}
 				c.keyFuncs, false)
 			assert.Equal(t, nil, err)
 
-			iterator.Visit(sql_generator.FixedTimesVisitor(func(i int, sql string) {
+			iterator.Visit(sqlgen.FixedTimesVisitor(func(i int, sql string) {
 				if c.expected != nil {
 					assert.Condition(t, func() (success bool) {
 						return c.expected(sql)
@@ -177,7 +177,7 @@ query:{table = _table()}
 					c.keyFuncs, rCase.rng, false)
 				assert.Equal(t, nil, err)
 
-				randIter.Visit(sql_generator.FixedTimesVisitor(func(i int, sql string) {
+				randIter.Visit(sqlgen.FixedTimesVisitor(func(i int, sql string) {
 					assert.Equal(t, rCase.expSeq[i], sql)
 				}, c.num))
 			}
@@ -222,7 +222,7 @@ func TestRecur(t *testing.T) {
 	assert.Equal(t, nil, err)
 
 	counter := 0
-	err = iter.Visit(sql_generator.FixedTimesVisitor(func(i int, sql string) {
+	err = iter.Visit(sqlgen.FixedTimesVisitor(func(i int, sql string) {
 		assert.Equal(t, counter, i)
 		counter++
 
@@ -243,11 +243,11 @@ func TestRecur(t *testing.T) {
 	assert.Equal(t, nil, err)
 }
 
-func getProductionName(productionSet *sql_generator.ProductionSet, i int) string {
+func getProductionName(productionSet *sqlgen.ProductionSet, i int) string {
 	return productionSet.Productions[i].Head.OriginString()
 }
 
-func getSeqPS(seqSet *sql_generator.SeqSet, i int) [2]int {
+func getSeqPS(seqSet *sqlgen.SeqSet, i int) [2]int {
 	return [2]int{seqSet.Seqs[i].PNumber, seqSet.Seqs[i].SNumber}
 }
 
@@ -281,7 +281,7 @@ func TestByYySimplePrint(t *testing.T) {
 	}, false)
 	assert.Equal(t, nil, err)
 
-	iter.Visit(sql_generator.FixedTimesVisitor(func(_ int, sql string) {
+	iter.Visit(sqlgen.FixedTimesVisitor(func(_ int, sql string) {
 		fmt.Println(sql)
 		fmt.Println("===============")
 	}, 10))
@@ -308,7 +308,7 @@ value:
 	iter, err := NewIter(code, "query", 5, nil, false)
 	assert.Equal(t, nil, err)
 
-	err = iter.Visit(sql_generator.FixedTimesVisitor(func(i int, sql string) {
+	err = iter.Visit(sqlgen.FixedTimesVisitor(func(i int, sql string) {
 		fmt.Println(sql)
 		for _, production := range iter.PathInfo().ProductionSet.Productions {
 			fmt.Println(production.Head.OriginString())

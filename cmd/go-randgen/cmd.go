@@ -2,16 +2,17 @@ package main
 
 import (
 	"fmt"
-	"github.com/pingcap/go-randgen/gendata"
-	"github.com/pingcap/go-randgen/grammar"
-	"github.com/pingcap/go-randgen/grammar/sql_generator"
-	"github.com/spf13/cobra"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/pingcap/go-randgen/gendata"
+	"github.com/pingcap/go-randgen/grammar"
+	"github.com/pingcap/go-randgen/grammar/sqlgen"
+	"github.com/spf13/cobra"
 )
 
 var zzPath string
@@ -114,7 +115,7 @@ func getRandSqls(keyf gendata.Keyfun) []string {
 
 	sqlIter := getIter(keyf)
 
-	err := sqlIter.Visit(sql_generator.FixedTimesVisitor(func(_ int, sql string) {
+	err := sqlIter.Visit(sqlgen.FixedTimesVisitor(func(_ int, sql string) {
 		randomSqls = append(randomSqls, sql)
 	}, queries))
 
@@ -125,7 +126,7 @@ func getRandSqls(keyf gendata.Keyfun) []string {
 	return randomSqls
 }
 
-func getIter(keyf gendata.Keyfun) sql_generator.SQLIterator {
+func getIter(keyf gendata.Keyfun) sqlgen.SQLIterator {
 	yy := loadYy()
 
 	iterator, err := grammar.NewIterWithRander(yy, root, maxRecursive, keyf,
