@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -31,6 +32,8 @@ type playOptions struct {
 	Rounds  int64
 	Threads int
 	DryRun  bool
+
+	LockThreshold time.Duration
 }
 
 func play(opts playOptions) error {
@@ -88,7 +91,7 @@ func play(opts playOptions) error {
 					}
 					continue
 				}
-				err = runTest(context.TODO(), test, db1, db2)
+				err = runTest(context.TODO(), test, db1, db2, opts.LockThreshold)
 				if err != nil {
 					log.Printf("failed to run test: %+v", err)
 					if firstErr == nil {
@@ -104,7 +107,7 @@ func play(opts playOptions) error {
 	return g.Wait()
 }
 
-func runTest(ctx context.Context, round TestRound, db1 *sql.DB, db2 *sql.DB) error {
+func runTest(ctx context.Context, round TestRound, db1 *sql.DB, db2 *sql.DB, lockThreshold time.Duration) error {
 	var (
 		wg       sync.WaitGroup
 		c1       *sql.Conn
@@ -192,9 +195,9 @@ func runTest(ctx context.Context, round TestRound, db1 *sql.DB, db2 *sql.DB) err
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(ctx, time.Minute)
 				if stmt.Flags&sqlgen.STMT_PREPARED > 0 {
-					rs1, err1 = doStmt(ctx, c1p, round.ID, stmt)
+					rs1, err1 = doStmt(ctx, c1p, round.ID, stmt, db1, lockThreshold)
 				} else {
-					rs1, err1 = doStmt(ctx, c1, round.ID, stmt)
+					rs1, err1 = doStmt(ctx, c1, round.ID, stmt, db1, lockThreshold)
 				}
 				cancel()
 			}()
@@ -202,9 +205,9 @@ func runTest(ctx context.Context, round TestRound, db1 *sql.DB, db2 *sql.DB) err
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(ctx, time.Minute)
 				if stmt.Flags&sqlgen.STMT_PREPARED > 0 {
-					rs2, err2 = doStmt(ctx, c2p, round.ID, stmt)
+					rs2, err2 = doStmt(ctx, c2p, round.ID, stmt, db2, lockThreshold)
 				} else {
-					rs2, err2 = doStmt(ctx, c2, round.ID, stmt)
+					rs2, err2 = doStmt(ctx, c2, round.ID, stmt, db2, lockThreshold)
 				}
 				cancel()
 			}()
@@ -266,22 +269,73 @@ func runTest(ctx context.Context, round TestRound, db1 *sql.DB, db2 *sql.DB) err
 	return nil
 }
 
-func doStmt(ctx context.Context, conn sqlz.ConnContext, round string, stmt sqlgen.Stmt) (*sqlz.ResultSet, error) {
-	// FIXME: prepared statement
+func doStmt(ctx context.Context, conn sqlz.ConnContext, round string, stmt sqlgen.Stmt, db *sql.DB, lockThreshold time.Duration) (rs *sqlz.ResultSet, err error) {
+	stmtDone := make(chan struct{})
+	dumpDone := make(chan struct{})
+	buf := new(strings.Builder)
+	go func() {
+		defer close(dumpDone)
+		needDump := false
+		if lockThreshold > 0 {
+			select {
+			case <-stmtDone:
+				if err != nil && strings.Contains(strings.ToLower(err.Error()), "lock") {
+					needDump = true
+				}
+			case <-time.After(lockThreshold):
+				needDump = true
+			}
+		} else {
+			<-stmtDone
+			if err != nil && strings.Contains(strings.ToLower(err.Error()), "lock") {
+				needDump = true
+			}
+		}
+		if !needDump {
+			return
+		}
+		// dump lock info
+		for _, query := range []string{
+			"select * from information_schema.deadlocks",
+			"select l.key, trx.*, tidb_decode_sql_digests(trx.all_sql_digests) SQLS from information_schema.data_lock_waits as l join information_schema.cluster_tidb_trx as trx on l.current_holding_trx_id = trx.id",
+		} {
+			res, err := db.Query(query)
+			if err == nil {
+				t, err := sqlz.ReadFromRows(res)
+				if err == nil && t.NRows() > 0 {
+					buf.WriteString(">> " + query + "\n")
+					dumpResultSet(buf, t)
+				}
+			}
+		}
+	}()
 	if stmt.Flags&sqlgen.STMT_QUERY > 0 {
-		rows, err := conn.QueryContext(ctx, "/* tp-test:"+round+" */ "+stmt.Query, stmt.Params...)
+		var rows *sql.Rows
+		rows, err = conn.QueryContext(ctx, "/* tp-test:"+round+" */ "+stmt.Query, stmt.Params...)
+		close(stmtDone)
+		<-dumpDone
 		if err != nil {
+			if buf.Len() > 0 {
+				err = errors.New(err.Error() + "\n" + buf.String() + "\n")
+			}
 			return nil, err
 		}
 		defer rows.Close()
-		return sqlz.ReadFromRows(rows)
+		rs, err = sqlz.ReadFromRows(rows)
 	} else {
-		res, err := conn.ExecContext(ctx, "/* tp-test:"+round+" */ "+stmt.Query, stmt.Params...)
+		var res sql.Result
+		res, err = conn.ExecContext(ctx, "/* tp-test:"+round+" */ "+stmt.Query, stmt.Params...)
+		close(stmtDone)
+		<-dumpDone
 		if err != nil {
+			if buf.Len() > 0 {
+				err = errors.New(err.Error() + "\n" + buf.String() + "\n")
+			}
 			return nil, err
 		}
-		return sqlz.NewFromResult(res), nil
+		rs = sqlz.NewFromResult(res)
 	}
+	return
 }
 
 func validateErrs(err1 error, err2 error) bool {

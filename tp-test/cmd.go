@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -62,6 +63,7 @@ func playCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.DBName, "db", "tp_test", "basename of database")
 	cmd.Flags().StringVar(&opts.OutDir, "out", "tp_test_out.d", "directory to dump failures")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "only print generated queries")
+	cmd.Flags().DurationVar(&opts.LockThreshold, "lock-threshold", 3*time.Second, "lock threshold")
 	return cmd
 }
 
