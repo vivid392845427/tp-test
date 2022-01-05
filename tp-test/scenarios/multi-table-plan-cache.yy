@@ -109,11 +109,9 @@ key_primary:
 
 key_c_int_part: | , key(c_int)
 key_c_int: [weight=2] key_c_int_part | , unique key(c_int) { T.mark_id('c_int') }
-key_c_str_part: | , key(c_str)
 key_c_enum: | ,key(c_enum)
-key_c_str: [weight=2] key_c_str_part | , unique key(c_str) { T.mark_id('c_str') }
-key_c_str_part: | , key(c_str(prefix_idx_len))
-key_c_str: [weight=2] key_c_str_part | , unique key(c_str(prefix_idx_len)) { T.mark_id('c_str') }
+key_c_str_part: | , key(c_str(prefix_idx_len)) |, key(c_str)
+key_c_str: [weight=2] key_c_str_part |, unique key(c_str(prefix_idx_len)) { T.mark_id('c_str') }
 key_c_decimal_part: | , key(c_decimal)
 key_c_decimal: [weight=2] key_c_decimal_part | , unique key(c_decimal) { T.mark_id('c_decimal') }
 key_c_datetime_part: | , key(c_datetime)
@@ -151,6 +149,7 @@ table_full_keys:
     key_c_datetime
     key_c_timestamp
     key_c_enum
+    expression_index
 
 table_part_keys:
     key_c_int_part
@@ -158,6 +157,26 @@ table_part_keys:
     key_c_decimal_part
     key_c_datetime_part
     key_c_timestamp_part
+	
+expression_index:
+ |  , key((lower(c_str)))
+ |  , unique key((lower(c_str)))
+ |  , key((md5(c_str)))
+ |  , unique key((md5(c_str)))
+ |  , key((reverse(c_str)))
+ |  , unique key((reverse(c_str)))
+ |  , key((upper(c_str)))
+ |  , unique key((upper(c_str)))
+ |  , key((vitess_hash(c_int)))
+ |  , unique key((vitess_hash(c_int)))
+ |  , key(c_int, (lower(c_str)))
+ |  , unique key(c_int, (lower(c_str)))
+ |  , key(c_int, (md5(c_str)))
+ |  , unique key(c_int, (md5(c_str)))
+ |  , key(c_int, (upper(c_str)))
+ |  , unique key(c_int, (upper(c_str)))
+ |  , key(vitess_hash(c_int), (c_str))
+ |  , unique key(vitess_hash(c_int), (c_str))
 
 parted_by_int:
     partition by hash (c_int) partitions 4
@@ -263,7 +282,7 @@ rand_logic: and | or
 rand_hint: | { printf("/*+ %s(t1,t2) */ ", T.rand_hint()) }
 rand_join: join | left join | right join
 
-maybe_for_update: | [weight=0] for update
+maybe_for_update: | [weight=0.4] for update
 maybe_write_limit: | [weight=2] order by c_int, c_str, c_double, c_decimal limit { print(math.random(3)) }
 select_order_by: order by c_int, c_str, c_double, c_decimal
 

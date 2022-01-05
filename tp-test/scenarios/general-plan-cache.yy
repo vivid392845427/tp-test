@@ -74,6 +74,7 @@ create_table:
         key_c_timestamp
         key_c_enum
         key_c_set
+        expression_index
     );
 
 key_primary:
@@ -118,6 +119,26 @@ key_c_enum:
 
 key_c_set:
  |  , key(c_set)
+ 
+expression_index:
+ |  , key((lower(c_str)))
+ |  , unique key((lower(c_str)))
+ |  , key((md5(c_str)))
+ |  , unique key((md5(c_str)))
+ |  , key((reverse(c_str)))
+ |  , unique key((reverse(c_str)))
+ |  , key((upper(c_str)))
+ |  , unique key((upper(c_str)))
+ |  , key((vitess_hash(c_int)))
+ |  , unique key((vitess_hash(c_int)))
+ |  , key(c_int, (lower(c_str)))
+ |  , unique key(c_int, (lower(c_str)))
+ |  , key(c_int, (md5(c_str)))
+ |  , unique key(c_int, (md5(c_str)))
+ |  , key(c_int, (upper(c_str)))
+ |  , unique key(c_int, (upper(c_str)))
+ |  , key(vitess_hash(c_int), (c_str))
+ |  , unique key(vitess_hash(c_int), (c_str))
 
 col_list: c_int, c_str, c_datetime, c_timestamp, c_double, c_decimal, c_enum, c_set
 

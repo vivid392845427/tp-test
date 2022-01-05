@@ -34,7 +34,7 @@
 
 }
 
-init: create_table; insert_data
+init: drop table if exists t;create_table; insert_data
 
 test: begin; rand_queries; commit;
 
@@ -52,6 +52,7 @@ create_table:
         key_c_decimal
         key_c_datetime
         key_c_timestamp
+        expression_index
     )
 
 key_primary:
@@ -86,6 +87,26 @@ key_c_datetime:
 key_c_timestamp:
  |  , key(c_timestamp)
  |  , unique key(c_timestamp) 
+ 
+expression_index:
+ |  , key((lower(c_str)))
+ |  , unique key((lower(c_str)))
+ |  , key((md5(c_str)))
+ |  , unique key((md5(c_str)))
+ |  , key((reverse(c_str)))
+ |  , unique key((reverse(c_str)))
+ |  , key((upper(c_str)))
+ |  , unique key((upper(c_str)))
+ |  , key((vitess_hash(c_int)))
+ |  , unique key((vitess_hash(c_int)))
+ |  , key(c_int, (lower(c_str)))
+ |  , unique key(c_int, (lower(c_str)))
+ |  , key(c_int, (md5(c_str)))
+ |  , unique key(c_int, (md5(c_str)))
+ |  , key(c_int, (upper(c_str)))
+ |  , unique key(c_int, (upper(c_str)))
+ |  , key(vitess_hash(c_int), (c_str))
+ |  , unique key(vitess_hash(c_int), (c_str))
 
 insert_data:
     insert into t values next_row, next_row, next_row, next_row, next_row;

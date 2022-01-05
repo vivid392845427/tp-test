@@ -109,17 +109,35 @@ key_primary:
 
 key_c_int_part: | , key(c_int)
 key_c_int: [weight=2] key_c_int_part | , unique key(c_int) { T.mark_id('c_int') }
-key_c_str_part: | , key(c_str)
+key_c_str_part: | , key(c_str) | , key(c_str(prefix_idx_len))
 key_c_enum: | ,key(c_enum)
 key_c_str: [weight=2] key_c_str_part | , unique key(c_str) { T.mark_id('c_str') }
-key_c_str_part: | , key(c_str(prefix_idx_len))
-key_c_str: [weight=2] key_c_str_part | , unique key(c_str(prefix_idx_len)) { T.mark_id('c_str') }
 key_c_decimal_part: | , key(c_decimal)
 key_c_decimal: [weight=2] key_c_decimal_part | , unique key(c_decimal) { T.mark_id('c_decimal') }
 key_c_datetime_part: | , key(c_datetime)
 key_c_datetime: [weight=2] key_c_datetime_part | , unique key(c_datetime)
 key_c_timestamp_part: | , key(c_timestamp)
 key_c_timestamp: [weight=2] key_c_timestamp_part | , unique key(c_timestamp)
+expression_index:
+ |  , key((lower(c_str)))
+ |  , unique key((lower(c_str)))
+ |  , key((md5(c_str)))
+ |  , unique key((md5(c_str)))
+ |  , key((reverse(c_str)))
+ |  , unique key((reverse(c_str)))
+ |  , key((upper(c_str)))
+ |  , unique key((upper(c_str)))
+ |  , key((vitess_hash(c_int)))
+ |  , unique key((vitess_hash(c_int)))
+ |  , key(c_int, (lower(c_str)))
+ |  , unique key(c_int, (lower(c_str)))
+ |  , key(c_int, (md5(c_str)))
+ |  , unique key(c_int, (md5(c_str)))
+ |  , key(c_int, (upper(c_str)))
+ |  , unique key(c_int, (upper(c_str)))
+ |  , key(vitess_hash(c_int), (c_str))
+ |  , unique key(vitess_hash(c_int), (c_str))
+
 
 table_defs:
     (table_cols table_full_keys)
@@ -151,6 +169,7 @@ table_full_keys:
     key_c_datetime
     key_c_timestamp
     key_c_enum
+    expression_index
 
 table_part_keys:
     key_c_int_part
