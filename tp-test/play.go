@@ -413,39 +413,42 @@ func dumpTest(out io.Writer, opts playOptions, test TestRound, err error) {
 
 	dumpStmt := func(stmt sqlgen.Stmt, tag string) {
 		seq++
-		tag = "/* t */ " + tag
-		if err == nil || stmt.Flags&sqlgen.STMT_PREPARED == 0 {
-			fmt.Fprintln(out, tag, stmt.String())
+		if stmt.Flags&sqlgen.STMT_PREPARED == 0 {
+			fmt.Fprintln(out, "/* test */", tag, stmt.String())
 			return
 		}
 		ps := pss[stmt.Query]
 		if len(ps) == 0 {
 			ps = "stmt" + strconv.Itoa(seq)
 			pss[stmt.Query] = ps
-			fmt.Fprintf(out, "%s prepare %s from %q;\n", tag, ps, stmt.Query)
+			fmt.Fprintf(out, "/* test */ %s prepare %s from %q;\n", tag, ps, stmt.Query)
 		}
 		vars := make([]string, len(stmt.Params))
 		for k, p := range stmt.Params {
 			vars[k] = "@v" + strconv.Itoa(k)
 			if p == nil {
-				fmt.Fprintf(out, "%s set %s = NULL;\n", tag, vars[k])
+				fmt.Fprintf(out, "/* test */ %s set %s = NULL;\n", tag, vars[k])
 				continue
 			}
 			switch x := p.(type) {
 			case string:
-				fmt.Fprintf(out, "%s set %s = %q;\n", tag, vars[k], x)
+				fmt.Fprintf(out, "/* test */ %s set %s = %q;\n", tag, vars[k], x)
 			case int64:
-				fmt.Fprintf(out, "%s set %s = %d;\n", tag, vars[k], x)
+				fmt.Fprintf(out, "/* test */ %s set %s = %d;\n", tag, vars[k], x)
 			case float64:
-				fmt.Fprintf(out, "%s set %s = %f;\n", tag, vars[k], x)
+				fmt.Fprintf(out, "/* test */ %s set %s = %f;\n", tag, vars[k], x)
 			default:
-				fmt.Fprintf(out, "%s set %s = %v;\n", tag, vars[k], p)
+				fmt.Fprintf(out, "/* test */ %s set %s = %v;\n", tag, vars[k], p)
 			}
 		}
+		prefix := "/* test */ "
+		if stmt.Flags&sqlgen.STMT_QUERY > 0 {
+			prefix = "/* test:query */ "
+		}
 		if len(vars) == 0 {
-			fmt.Fprintf(out, "%s execute %s;\n", tag, ps)
+			fmt.Fprintf(out, prefix+"%s execute %s;\n", tag, ps)
 		} else {
-			fmt.Fprintf(out, "%s execute %s using %s;\n", tag, ps, strings.Join(vars, ", "))
+			fmt.Fprintf(out, prefix+"%s execute %s using %s;\n", tag, ps, strings.Join(vars, ", "))
 		}
 	}
 
@@ -454,7 +457,7 @@ func dumpTest(out io.Writer, opts playOptions, test TestRound, err error) {
 	}
 	for i, test := range test.Tests {
 		for _, stmt := range test {
-			dumpStmt(stmt, fmt.Sprintf("/* %02d:%03d */", i+1, seq))
+			dumpStmt(stmt, fmt.Sprintf("/* t%02d:%03d */", i+1, seq))
 		}
 	}
 	if err != nil {
