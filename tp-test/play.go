@@ -241,7 +241,12 @@ func runTest(ctx context.Context, round TestRound, db1 *sql.DB, db2 *sql.DB, loc
 			h1 := rs1.DataDigest(digestOpts)
 			h2 := rs2.DataDigest(digestOpts)
 			if h1 != h2 {
-				return &ErrResultMismatch{stmtID, stmt, rs1, rs2}
+				err := &ErrResultMismatch{id: stmtID, stmt: stmt, rs1: rs1, rs2: rs2}
+				if stmt.Flags&sqlgen.STMT_QUERY > 0 && stmt.Flags&sqlgen.STMT_PREPARED == 0 {
+					err.explain1 = explainQuery(ctx, c1, stmt)
+					err.explain2 = explainQuery(ctx, c2, stmt)
+				}
+				return err
 			}
 		}
 		// post check
@@ -336,6 +341,21 @@ func doStmt(ctx context.Context, conn sqlz.ConnContext, round string, stmt sqlge
 		rs = sqlz.NewFromResult(res)
 	}
 	return
+}
+
+func explainQuery(ctx context.Context, conn sqlz.ConnContext, stmt sqlgen.Stmt) *sqlz.ResultSet {
+	rows, err := conn.QueryContext(ctx, "explain "+stmt.Query)
+	if err != nil {
+		log.Printf("failed to explain %q : %v", stmt.Query, err)
+		return nil
+	}
+	defer rows.Close()
+	rs, err := sqlz.ReadFromRows(rows)
+	if err != nil {
+		log.Printf("failed to read explain info of %q : %v", stmt.Query, err)
+		return nil
+	}
+	return rs
 }
 
 func validateErrs(err1 error, err2 error) bool {
@@ -471,6 +491,9 @@ type ErrResultMismatch struct {
 	stmt sqlgen.Stmt
 	rs1  *sqlz.ResultSet
 	rs2  *sqlz.ResultSet
+
+	explain1 *sqlz.ResultSet
+	explain2 *sqlz.ResultSet
 }
 
 func (e *ErrResultMismatch) Error() string {
@@ -481,6 +504,16 @@ func (e *ErrResultMismatch) Error() string {
 	fmt.Fprintln(buf, "===")
 	dumpResultSet(buf, e.rs2)
 	fmt.Fprintln(buf, ">>>")
+
+	if e.explain1 != nil {
+		fmt.Fprintln(buf, "\n1> explain "+e.stmt.Query)
+		dumpResultSet(buf, e.explain1)
+	}
+	if e.explain2 != nil {
+		fmt.Fprintln(buf, "\n2> explain "+e.stmt.Query)
+		dumpResultSet(buf, e.explain2)
+	}
+
 	return buf.String()
 }
 
