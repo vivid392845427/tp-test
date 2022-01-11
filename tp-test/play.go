@@ -475,9 +475,10 @@ func dumpTest(out io.Writer, opts playOptions, test TestRound, err error) {
 	for i, stmt := range test.Init {
 		dumpStmt(stmt, fmt.Sprintf("/* init:%02d */", i+1))
 	}
+	base := seq
 	for i, test := range test.Tests {
 		for _, stmt := range test {
-			dumpStmt(stmt, fmt.Sprintf("/* t%02d:%03d */", i+1, seq))
+			dumpStmt(stmt, fmt.Sprintf("/* t%02d:%03d */", i+1, seq-base+1))
 		}
 	}
 	if err != nil {
