@@ -176,8 +176,8 @@ func runTest(ctx context.Context, round TestRound, db1 *sql.DB, db2 *sql.DB, loc
 	for _, test := range round.Tests {
 		// submit transaction
 		var (
-			hs1  map[string]string
-			hs2  map[string]string
+			hs1  map[string]*QueryResult
+			hs2  map[string]*QueryResult
 			err1 error
 			err2 error
 		)
@@ -265,8 +265,13 @@ func runTest(ctx context.Context, round TestRound, db1 *sql.DB, db2 *sql.DB, loc
 			return fmt.Errorf("post check tables failed with errors: %v <> %v", err1, err2)
 		}
 		for t := range hs2 {
-			if hs1[t] != hs2[t] {
-				return fmt.Errorf("post check table %s: data mismatch", t)
+			if hs1[t].Digest != hs2[t].Digest {
+				return &ErrResultMismatch{
+					id:   round.ID + ":" + strconv.Itoa(seq) + ":post-check",
+					stmt: sqlgen.Stmt{Query: "select * from " + t, Flags: sqlgen.STMT_QUERY},
+					rs1:  hs1[t].Result,
+					rs2:  hs2[t].Result,
+				}
 			}
 		}
 	}
@@ -362,7 +367,12 @@ func validateErrs(err1 error, err2 error) bool {
 	return (err1 == nil && err2 == nil) || (err1 != nil && err2 != nil)
 }
 
-func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]string, error) {
+type QueryResult struct {
+	Digest string
+	Result *sqlz.ResultSet
+}
+
+func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]*QueryResult, error) {
 	if len(name) == 0 {
 		if err := db.QueryRow("select database()").Scan(&name); err != nil {
 			return nil, err
@@ -373,7 +383,7 @@ func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]strin
 		return nil, err
 	}
 	defer rows.Close()
-	hs := make(map[string]string)
+	hs := make(map[string]*QueryResult)
 	for rows.Next() {
 		var t string
 		if err = rows.Scan(&t); err != nil {
@@ -389,29 +399,31 @@ func checkTables(ctx context.Context, db *sql.DB, name string) (map[string]strin
 	return hs, nil
 }
 
-func checkTable(ctx context.Context, db *sql.DB, name string) (string, error) {
+func checkTable(ctx context.Context, db *sql.DB, name string) (*QueryResult, error) {
 	_, err := db.ExecContext(ctx, "admin check table "+name)
 	if err != nil {
 		if e, ok := err.(*mysql.MySQLError); !ok || e.Number != 1064 {
-			return "", err
+			return nil, err
 		}
 	}
 	rows, err := db.QueryContext(ctx, "select * from "+name)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer rows.Close()
 	rs, err := sqlz.ReadFromRows(rows)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return rs.DataDigest(sqlz.DigestOptions{
-		Sort: true,
-		Filter: func(i int, j int, raw []byte, def sqlz.ColumnDef) bool {
-			return rs.ColumnDef(j).Type != "JSON"
-		},
-	}), nil
-
+	return &QueryResult{
+		Result: rs,
+		Digest: rs.DataDigest(sqlz.DigestOptions{
+			Sort: true,
+			Filter: func(i int, j int, raw []byte, def sqlz.ColumnDef) bool {
+				return rs.ColumnDef(j).Type != "JSON"
+			},
+		}),
+	}, nil
 }
 
 func dumpTest(out io.Writer, opts playOptions, test TestRound, err error) {
